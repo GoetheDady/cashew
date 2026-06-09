@@ -1,0 +1,30 @@
+{
+  "name": "cashew",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A Pi-based personal agent desktop app.",
+  "packageManager": "pnpm@10.28.2",
+  "scripts": {
+    "dev": "pnpm --filter @cashew/desktop dev",
+    "build": "pnpm --filter @cashew/desktop build",
+    "preview": "pnpm --filter @cashew/desktop preview",
+    "package": "pnpm --filter @cashew/desktop package",
+    "make": "pnpm --filter @cashew/desktop make",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@google/genai",
+      "electron",
+      "electron-winstaller",
+      "esbuild",
+      "fs-xattr",
+      "macos-alias",
+      "protobufjs"
+    ]
+  }
+}
