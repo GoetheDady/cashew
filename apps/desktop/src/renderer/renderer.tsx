@@ -1,13 +1,11 @@
 import { createRoot } from 'react-dom/client';
 import { FormEvent, useState } from 'react';
 import './index.css';
-import type { ChatMessage } from '@cashew/shared';
+import { useChatSession } from './chat-session';
 
 function App() {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const { messages, isSending, error, sendPrompt, cancelCurrentTurn } = useChatSession();
   const [prompt, setPrompt] = useState('');
-  const [isSending, setIsSending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   async function sendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -18,35 +16,8 @@ function App() {
       return;
     }
 
-    setError(null);
     setPrompt('');
-    setIsSending(true);
-
-    const now = new Date().toISOString();
-    const userMessage: ChatMessage = {
-      id: crypto.randomUUID(),
-      role: 'user',
-      content,
-      createdAt: now,
-    };
-
-    setMessages((current) => [...current, userMessage]);
-
-    try {
-      const response = await window.cashew.chat({ prompt: content });
-      const assistantMessage: ChatMessage = {
-        id: crypto.randomUUID(),
-        role: 'assistant',
-        content: response.text || '(empty response)',
-        createdAt: new Date().toISOString(),
-      };
-
-      setMessages((current) => [...current, assistantMessage]);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setIsSending(false);
-    }
+    await sendPrompt(content);
   }
 
   return (
@@ -127,11 +98,12 @@ function App() {
                   placeholder="Ask Cashew..."
                 />
                 <button
-                  disabled={isSending || !prompt.trim()}
+                  disabled={!isSending && !prompt.trim()}
+                  onClick={isSending ? cancelCurrentTurn : undefined}
                   className="w-24 rounded bg-[#1b1d22] px-4 py-3 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-[#b6afa5]"
-                  type="submit"
+                  type={isSending ? 'button' : 'submit'}
                 >
-                  {isSending ? 'Sending' : 'Send'}
+                  {isSending ? 'Cancel' : 'Send'}
                 </button>
               </form>
             </div>

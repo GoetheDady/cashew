@@ -1,9 +1,10 @@
-import type { ChatRequest, ChatResponse } from '@cashew/shared';
+import type { ChatCommand, ChatEvent } from '@cashew/shared';
 
 declare global {
   interface Window {
     cashew: {
-      chat: (request: ChatRequest) => Promise<ChatResponse>;
+      sendChatCommand: (command: ChatCommand) => Promise<void>;
+      subscribeChatEvents: (listener: (event: ChatEvent) => void) => () => void;
     };
   }
 }

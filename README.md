@@ -30,17 +30,32 @@ pnpm build
 pnpm preview
 pnpm typecheck
 pnpm lint
+pnpm test
 pnpm package
 pnpm make
 ```
 
 ## Current Scope
 
-The project is initialized as an Electron-first app. The agent runs in the
-Electron main process and communicates with the React UI through IPC.
+The project is initialized as an Electron-first app. The agent runtime runs in
+the Electron main process and communicates with the React UI through a typed IPC
+event protocol.
 
 The first chat path is wired to DeepSeek through `@earendil-works/pi-agent-core`
-and `@earendil-works/pi-ai`. It reads credentials from `DEEPSEEK_API_KEY`.
+and `@earendil-works/pi-ai`. It keeps an in-memory agent session per renderer
+window, streams assistant text deltas to the UI, and supports cancelling the
+active turn.
+
+Model configuration is loaded through the agent settings module. It reads
+`DEEPSEEK_API_KEY` from the process environment first. In local development, it
+then checks:
+
+```text
+apps/desktop/.env.local
+apps/desktop/.env
+.env.local
+.env
+```
 
 For local development, put the key in:
 
