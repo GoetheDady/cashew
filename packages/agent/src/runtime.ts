@@ -9,6 +9,8 @@ import type {
   ChatMessage,
   ChatSessionId,
   ChatTurnId,
+  DBCommand,
+  DBEvent,
 } from "@cashew/shared";
 import {
   AgentConfigError,
@@ -16,6 +18,7 @@ import {
   type LoadAgentModelConfigOptions,
   loadAgentModelConfig,
 } from "./settings.js";
+import { ChatDatabase } from "./database.js";
 
 registerBuiltInApiProviders();
 
@@ -229,12 +232,17 @@ export class AgentRuntime {
   private readonly sessions = new Map<number, AgentSession>();
   private readonly createId: () => string;
   private readonly options: AgentRuntimeOptions;
+  private readonly db: ChatDatabase; // 数据库实例
 
   constructor(options: AgentRuntimeOptions = {}) {
     this.options = options;
     this.createId = options.createId ?? randomUUID;
+    this.db = new ChatDatabase(); // electron-store 不需要传路径参数
   }
 
+  /**
+   * 处理聊天命令（现有逻辑，待改造为持久化）
+   */
   async handleCommand(
     windowId: number,
     command: ChatCommand,
@@ -254,6 +262,61 @@ export class AgentRuntime {
         turnId: this.createId(),
         code: getErrorCode(error),
         message: getErrorMessage(error),
+      });
+    }
+  }
+
+  /**
+   * 处理数据库命令
+   */
+  handleDBCommand(command: DBCommand, emit: (event: DBEvent) => void): void {
+    try {
+      switch (command.type) {
+        case 'create_session': {
+          const session = this.db.createSession(command.title);
+          emit({ type: 'session_created', session });
+          break;
+        }
+
+        case 'get_all_sessions': {
+          const sessions = this.db.getAllSessions();
+          emit({ type: 'sessions_loaded', sessions });
+          break;
+        }
+
+        case 'get_session': {
+          const session = this.db.getSession(command.sessionId);
+          emit({ type: 'session_loaded', session: session ?? null });
+          break;
+        }
+
+        case 'delete_session': {
+          this.db.deleteSession(command.sessionId);
+          emit({ type: 'session_deleted', sessionId: command.sessionId });
+          break;
+        }
+
+        case 'get_messages': {
+          const messages = this.db.getMessages(command.sessionId);
+          emit({ type: 'messages_loaded', messages });
+          break;
+        }
+
+        case 'update_session_title': {
+          this.db.updateSessionTitle(command.sessionId, command.title);
+          emit({ type: 'session_title_updated', sessionId: command.sessionId, title: command.title });
+          break;
+        }
+
+        default: {
+          const _exhaustive: never = command;
+          throw new Error(`Unknown DB command: ${JSON.stringify(_exhaustive)}`);
+        }
+      }
+    } catch (error) {
+      emit({
+        type: 'db_error',
+        error: error instanceof Error ? error.message : 'Unknown database error',
       });
     }
   }

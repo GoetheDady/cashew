@@ -1,5 +1,7 @@
 export const CHAT_COMMAND_CHANNEL = "cashew:chat-command";
 export const CHAT_EVENT_CHANNEL = "cashew:chat-event";
+export const DB_COMMAND_CHANNEL = "cashew:db-command";
+export const DB_EVENT_CHANNEL = "cashew:db-event";
 
 export type ChatSessionId = string;
 export type ChatTurnId = string;
@@ -65,3 +67,38 @@ export type ChatEvent =
 export function assertNever(value: never): never {
   throw new Error(`Unhandled value: ${JSON.stringify(value)}`);
 }
+
+// 数据库相关类型
+export interface DBSession {
+  id: string;
+  title: string;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface DBMessage {
+  id: string;
+  session_id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  created_at: number;
+}
+
+// 数据库命令类型
+export type DBCommand =
+  | { type: 'create_session'; title?: string }
+  | { type: 'get_all_sessions' }
+  | { type: 'get_session'; sessionId: string }
+  | { type: 'delete_session'; sessionId: string }
+  | { type: 'get_messages'; sessionId: string }
+  | { type: 'update_session_title'; sessionId: string; title: string };
+
+// 数据库事件类型
+export type DBEvent =
+  | { type: 'session_created'; session: DBSession }
+  | { type: 'sessions_loaded'; sessions: DBSession[] }
+  | { type: 'session_loaded'; session: DBSession | null }
+  | { type: 'session_deleted'; sessionId: string }
+  | { type: 'messages_loaded'; messages: DBMessage[] }
+  | { type: 'session_title_updated'; sessionId: string; title: string }
+  | { type: 'db_error'; error: string };
