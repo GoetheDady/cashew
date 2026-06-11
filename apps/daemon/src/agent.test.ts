@@ -116,6 +116,36 @@ describe('turn endpoints', () => {
     expect(response.status).toBe(400);
   });
 
+  it('POST /turns without config returns a turn_failed SSE event', async () => {
+    const app = new Hono();
+    createTurnRoutes(app, db, undefined, () => null);
+    const localServer = serve({ fetch: app.fetch, port: 0 });
+    const localPort = (localServer.address() as { port: number }).port;
+
+    try {
+      const response = await fetch(`http://localhost:${localPort}/turns`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: 'Hi' }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get('content-type')).toContain('text/event-stream');
+
+      const events = await readSSEStream(response);
+      expect(events).toHaveLength(1);
+      expect(events[0].event).toBe('turn_failed');
+      expect(events[0].data).toMatchObject({
+        type: 'turn_failed',
+        code: 'missing_api_key',
+        message:
+          'Cashew is not configured yet. Add your model provider, model, and API key before sending a message.',
+      });
+    } finally {
+      localServer.close();
+    }
+  });
+
   it('POST /turns returns SSE stream with proper events', async () => {
     // 先 setup：让 fakeAgent.prompt resolve 后才 emit delta
     fakeAgent.prompt = vi.fn(async () => {

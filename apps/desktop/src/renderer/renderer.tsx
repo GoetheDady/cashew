@@ -1,21 +1,13 @@
 import {
-  Archive,
+  ArrowUp,
   CaretDown,
-  ChatCircleText,
   DotsThreeVertical,
-  FileCode,
-  FolderSimple,
   GearSix,
-  House,
   MagnifyingGlass,
   Microphone,
   NotePencil,
   Paperclip,
-  Plus,
-  SidebarSimple,
   Sparkle,
-  Star,
-  Trash,
   Wrench,
   X,
 } from '@phosphor-icons/react';
@@ -26,22 +18,15 @@ import './index.css';
 import { useChatSession } from './chat-session';
 import { useSessionManager } from './session-manager';
 import { ConnectionBanner } from './components/connection-banner';
+import { Button } from './components/ui/button';
+import { useDaemonConnection } from './use-daemon-connection';
 import logoLockup from './assets/cashew-logo-lockup.png';
-
 type DisplayMessage = {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   createdAt?: string | number;
 };
-
-const navItems = [
-  { label: 'Home', icon: House },
-  { label: 'Chat', icon: ChatCircleText, active: true },
-  { label: 'Tasks', icon: Archive },
-  { label: 'Tools', icon: Wrench },
-  { label: 'Settings', icon: GearSix },
-];
 
 function formatTime(value?: string | number) {
   if (!value) {
@@ -91,6 +76,7 @@ function getMessageTimestamp(message: DisplayMessage) {
 }
 
 function App() {
+  const { isConnected } = useDaemonConnection();
   const {
     sessions,
     activeSessionId,
@@ -100,7 +86,7 @@ function App() {
     createSession,
     activateSession,
     deleteSession,
-  } = useSessionManager();
+  } = useSessionManager({ enabled: isConnected });
 
   const { messages, isSending, error: chatError, sendPrompt, cancelCurrentTurn } = useChatSession();
   const [prompt, setPrompt] = useState('');
@@ -141,49 +127,26 @@ function App() {
   const displayMessages: DisplayMessage[] = activeSessionId
     ? [...dbMessages, ...messages]
     : messages;
-  const totalMessages = displayMessages.length;
   const latestError = chatError || sessionError;
 
   return (
     <main className="app-shell">
       <ConnectionBanner />
-      <aside className="brand-rail" aria-label="Primary">
-        <div className="brand-lockup">
-          <img src={logoLockup} alt="Cashew" />
-        </div>
-
-        <nav className="rail-nav">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            return (
-              <button
-                key={item.label}
-                className={`rail-link ${item.active ? 'is-active' : ''}`}
-                type="button"
-              >
-                <Icon size={22} weight="regular" />
-                <span>{item.label}</span>
-              </button>
-            );
-          })}
-        </nav>
-
-        <div className="agent-status">
-          <span className="agent-status__light" aria-hidden="true" />
-          <span>Local agent ready</span>
-        </div>
-      </aside>
 
       <aside className="conversation-panel" aria-label="Conversations">
-        <div className="panel-heading">
-          <div>
-            <p className="section-kicker">Workspace</p>
-            <h1>Conversations</h1>
+        <div className="sidebar-top">
+          <div className="app-mark">
+            <img src={logoLockup} alt="Cashew" />
           </div>
-          <button className="icon-button" onClick={() => createSession()} type="button" aria-label="New chat">
-            <NotePencil size={19} />
-          </button>
+          <Button className="icon-button" variant="ghost" size="icon" type="button" aria-label="Settings">
+            <GearSix size={19} />
+          </Button>
         </div>
+
+        <Button className="new-chat-button" variant="secondary" onClick={() => createSession()} type="button">
+          <NotePencil size={18} />
+          <span>New chat</span>
+        </Button>
 
         <label className="search-field">
           <MagnifyingGlass size={18} />
@@ -194,11 +157,6 @@ function App() {
             placeholder="Search conversations..."
           />
         </label>
-
-        <div className="conversation-tabs" aria-label="Conversation filters">
-          <button className="is-selected" type="button">Recent</button>
-          <button type="button">Starred</button>
-        </div>
 
         <div className="conversation-list">
           {isLoading && sessions.length === 0 ? (
@@ -211,7 +169,7 @@ function App() {
             <div className="empty-panel">
               <Sparkle size={22} />
               <p>No conversations found</p>
-              <button onClick={() => createSession()} type="button">Start one</button>
+              <Button onClick={() => createSession()} type="button">Start one</Button>
             </div>
           ) : (
             Object.entries(groupedSessions).map(([group, groupSessions]) => (
@@ -225,27 +183,30 @@ function App() {
                         activeSessionId === session.id ? 'is-active' : ''
                       }`}
                     >
-                      <button
+                      <Button
                         onClick={() => activateSession(session.id)}
                         className="session-card__main"
+                        variant="ghost"
                         type="button"
                       >
                         <span className="session-card__title">{session.title}</span>
                         <span className="session-card__meta">
                           {formatTime(session.updated_at)}
                         </span>
-                      </button>
-                      <button
+                      </Button>
+                      <Button
                         onClick={(event) => {
                           event.stopPropagation();
                           deleteSession(session.id);
                         }}
                         className="session-card__delete"
+                        variant="ghost"
+                        size="icon"
                         type="button"
                         aria-label={`Delete ${session.title}`}
                       >
                         <X size={14} />
-                      </button>
+                      </Button>
                     </article>
                   ))}
                 </div>
@@ -254,42 +215,30 @@ function App() {
           )}
         </div>
 
-        <button className="new-chat-button" onClick={() => createSession()} type="button">
-          <Plus size={18} />
-          <span>New chat</span>
-        </button>
+        <div className="sidebar-footer">
+          <span className="agent-status__light" aria-hidden="true" />
+          <span>Local agent ready</span>
+        </div>
       </aside>
 
       <section className="chat-workspace" aria-label="Chat workspace">
         <header className="chat-header">
           <div className="chat-title">
-            <button className="ghost-icon" type="button" aria-label="Toggle sidebar">
-              <SidebarSimple size={20} />
-            </button>
             <div>
-              <p className="section-kicker">Current thread</p>
               <h2>{activeSession?.title || 'Cashew Agent'}</h2>
+              <p>{activeSession ? formatDay(activeSession.updated_at) : 'New conversation'}</p>
             </div>
-            <button className="ghost-icon" type="button" aria-label="Rename conversation">
-              <NotePencil size={18} />
-            </button>
           </div>
 
           <div className="chat-controls">
-            <button className="model-select" type="button">
+            <Button className="model-select" variant="secondary" type="button">
               <Sparkle size={18} />
-              <span>Model: DeepSeek</span>
+              <span>DeepSeek</span>
               <CaretDown size={14} />
-            </button>
-            <button className="memory-toggle" type="button" aria-pressed="true">
-              <span>Memory</span>
-              <span className="memory-toggle__track">
-                <span />
-              </span>
-            </button>
-            <button className="icon-button" type="button" aria-label="More actions">
+            </Button>
+            <Button className="icon-button" variant="ghost" size="icon" type="button" aria-label="More actions">
               <DotsThreeVertical size={20} />
-            </button>
+            </Button>
           </div>
         </header>
 
@@ -300,8 +249,7 @@ function App() {
                 <div className="empty-chat__mark">
                   <img src={logoLockup} alt="" />
                 </div>
-                <h3>Start with a clear request</h3>
-                <p>Cashew is ready for planning, coding, and local project work.</p>
+                <h3>What can I help with?</h3>
               </div>
             ) : (
               displayMessages.map((message) => {
@@ -349,120 +297,34 @@ function App() {
           />
           <div className="composer-actions">
             <div className="composer-tools">
-              <button className="icon-button" type="button" aria-label="Attach file">
+              <Button className="icon-button" variant="ghost" size="icon" type="button" aria-label="Attach file">
                 <Paperclip size={20} />
-              </button>
-              <button className="tool-button" type="button">
+              </Button>
+              <Button className="tool-button" variant="secondary" type="button">
                 <Wrench size={18} />
                 <span>Tools</span>
                 <CaretDown size={14} />
-              </button>
+              </Button>
             </div>
             <div className="composer-tools">
-              <button className="icon-button" type="button" aria-label="Voice input">
+              <Button className="icon-button" variant="ghost" size="icon" type="button" aria-label="Voice input">
                 <Microphone size={20} />
-              </button>
-              <button
+              </Button>
+              <Button
                 disabled={!isSending && !prompt.trim()}
                 onClick={isSending ? cancelCurrentTurn : undefined}
                 className="send-button"
+                variant="default"
+                size="icon"
                 type={isSending ? 'button' : 'submit'}
               >
-                {isSending ? <X size={22} /> : <Plus size={22} weight="bold" />}
+                {isSending ? <X size={22} /> : <ArrowUp size={21} weight="bold" />}
                 <span className="sr-only">{isSending ? 'Cancel' : 'Send'}</span>
-              </button>
+              </Button>
             </div>
           </div>
         </form>
       </section>
-
-      <aside className="details-panel" aria-label="Conversation details">
-        <div className="details-header">
-          <div className="details-tabs">
-            <button className="is-selected" type="button">Details</button>
-            <button type="button">Context</button>
-          </div>
-          <button className="ghost-icon" type="button" aria-label="Close details">
-            <X size={18} />
-          </button>
-        </div>
-
-        <section className="detail-block">
-          <div className="detail-title-row">
-            <h2>{activeSession?.title || 'New conversation'}</h2>
-            <button className="ghost-icon" type="button" aria-label="Favorite conversation">
-              <Star size={18} />
-            </button>
-          </div>
-          <dl className="detail-list">
-            <div>
-              <dt>Created</dt>
-              <dd>{formatDay(activeSession?.created_at)}</dd>
-            </div>
-            <div>
-              <dt>Model</dt>
-              <dd>DeepSeek</dd>
-            </div>
-            <div>
-              <dt>Messages</dt>
-              <dd>{totalMessages}</dd>
-            </div>
-            <div>
-              <dt>Tokens used</dt>
-              <dd>{totalMessages > 0 ? `${Math.max(totalMessages * 240, 240)}` : '0'}</dd>
-            </div>
-          </dl>
-        </section>
-
-        <section className="detail-block">
-          <h3>Tags</h3>
-          <div className="tag-list">
-            <span>planning</span>
-            <span>architecture</span>
-            <button type="button" aria-label="Add tag">
-              <Plus size={14} />
-            </button>
-          </div>
-        </section>
-
-        <section className="detail-card">
-          <h3>Files referenced</h3>
-          <div className="file-list">
-            <div>
-              <FolderSimple size={18} />
-              <span>~/gdsw/cashew</span>
-            </div>
-            <div>
-              <FileCode size={18} />
-              <span>package.json</span>
-            </div>
-            <div>
-              <FileCode size={18} />
-              <span>renderer.tsx</span>
-            </div>
-          </div>
-        </section>
-
-        <section className="detail-card">
-          <h3>Notes</h3>
-          <p>Planning the foundation for Cashew as a local-first personal agent.</p>
-          <button className="note-button" type="button">
-            <NotePencil size={16} />
-            <span>Edit notes</span>
-          </button>
-        </section>
-
-        <section className="detail-card actions-card">
-          <button type="button">
-            <Archive size={18} />
-            <span>Export conversation</span>
-          </button>
-          <button className="danger" onClick={() => activeSessionId && deleteSession(activeSessionId)} type="button">
-            <Trash size={18} />
-            <span>Delete conversation</span>
-          </button>
-        </section>
-      </aside>
     </main>
   );
 }

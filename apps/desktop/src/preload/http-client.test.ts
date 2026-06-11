@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { ChatEvent, DBCommand } from '@cashew/shared';
-import { parseSSEStream, mapDBCommandToFetch } from './http-client.js';
+import { formatDaemonError, parseSSEStream, mapDBCommandToFetch } from './http-client.js';
 
 /**
  * Issue 06: Desktop preload HTTP 适配层
@@ -86,6 +86,18 @@ describe('mapDBCommandToFetch', () => {
     });
     expect(result.url).toBe(`http://localhost:${PORT}/sessions/abc/messages`);
     expect(result.method).toBe('GET');
+  });
+});
+
+describe('formatDaemonError', () => {
+  it('turns missing configuration into an actionable message', () => {
+    expect(formatDaemonError(400, { error: 'Configuration not found.' })).toBe(
+      'Cashew is not configured yet. Add your model provider, model, and API key before sending a message.',
+    );
+  });
+
+  it('preserves daemon error messages when they are already specific', () => {
+    expect(formatDaemonError(400, { error: 'prompt is required' })).toBe('prompt is required');
   });
 });
 

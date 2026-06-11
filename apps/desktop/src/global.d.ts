@@ -1,4 +1,4 @@
-import type { ChatCommand, ChatEvent, DBCommand, DBEvent } from '@cashew/shared';
+import type { ChatCommand, ChatEvent, DaemonStatus, DBCommand, DBEvent } from '@cashew/shared';
 
 declare global {
   interface Window {
@@ -7,6 +7,8 @@ declare global {
       subscribeChatEvents: (listener: (event: ChatEvent) => void) => () => void;
       sendDBCommand: (command: DBCommand) => Promise<void>;
       subscribeDBEvents: (listener: (event: DBEvent) => void) => () => void;
+      getDaemonStatus: () => Promise<DaemonStatus>;
+      subscribeDaemonStatus: (listener: (status: DaemonStatus) => void) => () => void;
     };
   }
 }

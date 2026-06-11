@@ -207,13 +207,36 @@ export function createTurnRoutes(
   const sm = sessionManager ?? new DefaultSessionManager();
   const cfg = getConfig ?? (() => loadConfig(DEFAULT_CONFIG_PATH));
 
+  function sseEventResponse(event: ChatEvent): Response {
+    const encoder = new TextEncoder();
+    return new Response(
+      encoder.encode(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`),
+      {
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          Connection: 'keep-alive',
+          'Access-Control-Allow-Origin': '*',
+        },
+      },
+    );
+  }
+
   app.post('/turns', async (c) => {
     const body = await c.req.json().catch(() => ({}));
     const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : '';
     if (!prompt) return c.json({ error: 'prompt is required' }, 400);
 
     const config = cfg();
-    if (!config) return c.json({ error: 'Configuration not found.' }, 400);
+    if (!config) {
+      return sseEventResponse({
+        type: 'turn_failed',
+        turnId: randomUUID(),
+        code: 'missing_api_key',
+        message:
+          'Cashew is not configured yet. Add your model provider, model, and API key before sending a message.',
+      });
+    }
 
     const turn = sm.getOrCreate(config);
 

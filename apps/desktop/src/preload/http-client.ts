@@ -1,5 +1,24 @@
 import type { ChatEvent, DBCommand, DBEvent, DBSession, DBMessage } from '@cashew/shared';
 
+function getErrorMessage(data: unknown): string | null {
+  if (typeof data !== 'object' || data === null || !('error' in data)) {
+    return null;
+  }
+
+  const { error } = data as { error?: unknown };
+  return typeof error === 'string' ? error : null;
+}
+
+export function formatDaemonError(status: number, data: unknown): string {
+  const message = getErrorMessage(data);
+
+  if (message === 'Configuration not found.') {
+    return 'Cashew is not configured yet. Add your model provider, model, and API key before sending a message.';
+  }
+
+  return message || `Request failed with status ${status}`;
+}
+
 /**
  * 从 SSE ReadableStream 解析出所有事件。
  * SSE 格式：event: <type>\ndata: <json>\n\n

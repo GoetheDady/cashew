@@ -11,7 +11,18 @@ type DaemonStatusListener = (status: DaemonStatus) => void;
 /** 轮询间隔（毫秒） */
 const POLL_INTERVAL_MS = 300;
 /** 连接超时（毫秒） */
-const CONNECT_TIMEOUT_MS = 5000;
+const CONNECT_TIMEOUT_MS = 30000;
+/** 最长恢复轮询时间（毫秒） */
+const RECOVERY_POLL_TIMEOUT_MS = 120000;
+
+interface DaemonManagerOptions {
+  portFilePath?: string;
+  pollIntervalMs?: number;
+  connectTimeoutMs?: number;
+  recoveryPollTimeoutMs?: number;
+  checkHealth?: (port: number) => Promise<boolean>;
+  spawnDaemon?: () => ChildProcess;
+}
 
 /**
  * Daemon 进程管理器。
@@ -28,9 +39,19 @@ export class DaemonManager {
   private listeners = new Set<DaemonStatusListener>();
   private currentStatus: DaemonStatus = { state: 'disconnected' };
   private readonly portFilePath: string;
+  private readonly pollIntervalMs: number;
+  private readonly connectTimeoutMs: number;
+  private readonly recoveryPollTimeoutMs: number;
+  private readonly checkHealthOverride?: (port: number) => Promise<boolean>;
+  private readonly spawnDaemonOverride?: () => ChildProcess;
 
-  constructor() {
-    this.portFilePath = join(homedir(), '.cashew', 'daemon.port');
+  constructor(options: DaemonManagerOptions = {}) {
+    this.portFilePath = options.portFilePath ?? join(homedir(), '.cashew', 'daemon.port');
+    this.pollIntervalMs = options.pollIntervalMs ?? POLL_INTERVAL_MS;
+    this.connectTimeoutMs = options.connectTimeoutMs ?? CONNECT_TIMEOUT_MS;
+    this.recoveryPollTimeoutMs = options.recoveryPollTimeoutMs ?? RECOVERY_POLL_TIMEOUT_MS;
+    this.checkHealthOverride = options.checkHealth;
+    this.spawnDaemonOverride = options.spawnDaemon;
   }
 
   /** 读取端口文件中的端口号 */
@@ -46,6 +67,10 @@ export class DaemonManager {
 
   /** 尝试连接 daemon 的健康检查 */
   private async checkHealth(port: number): Promise<boolean> {
+    if (this.checkHealthOverride) {
+      return this.checkHealthOverride(port);
+    }
+
     try {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 1000);
@@ -94,13 +119,17 @@ export class DaemonManager {
   private spawnDaemon(): void {
     if (this.daemonProcess) return;
 
-    const { command, args } = this.getDaemonCommand();
+    if (this.spawnDaemonOverride) {
+      this.daemonProcess = this.spawnDaemonOverride();
+    } else {
+      const { command, args } = this.getDaemonCommand();
 
-    this.daemonProcess = spawn(command, args, {
-      detached: true,
-      stdio: 'ignore',
-      env: { ...process.env, CASHEW_PORT: '11434' },
-    });
+      this.daemonProcess = spawn(command, args, {
+        detached: true,
+        stdio: 'ignore',
+        env: { ...process.env, CASHEW_PORT: process.env.CASHEW_PORT ?? '0' },
+      });
+    }
 
     this.daemonProcess.unref();
 
@@ -116,9 +145,10 @@ export class DaemonManager {
   /** 轮询端口文件和健康检查 */
   private startPolling(timeoutMs: number): void {
     let elapsed = 0;
+    let timeoutReported = false;
 
     this.pollTimer = setInterval(async () => {
-      elapsed += POLL_INTERVAL_MS;
+      elapsed += this.pollIntervalMs;
 
       const port = this.readPortFile();
 
@@ -132,14 +162,22 @@ export class DaemonManager {
         }
       }
 
-      if (elapsed >= timeoutMs) {
+      if (elapsed >= timeoutMs && !timeoutReported) {
+        timeoutReported = true;
+        this.setStatus({
+          state: 'error',
+          message: 'Failed to connect to Cashew service. Make sure the daemon is running.',
+        });
+      }
+
+      if (elapsed >= this.recoveryPollTimeoutMs) {
         this.stopPolling();
         this.setStatus({
           state: 'error',
           message: 'Failed to connect to Cashew service. Make sure the daemon is running.',
         });
       }
-    }, POLL_INTERVAL_MS);
+    }, this.pollIntervalMs);
   }
 
   private stopPolling(): void {
@@ -171,7 +209,7 @@ export class DaemonManager {
 
     // 拉起 daemon
     this.spawnDaemon();
-    this.startPolling(CONNECT_TIMEOUT_MS);
+    this.startPolling(this.connectTimeoutMs);
   }
 
   /** 停止 daemon（发送 shutdown 请求） */

@@ -1,6 +1,11 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { ChatCommand, ChatEvent, DBCommand, DBEvent, DaemonStatus } from '@cashew/shared';
-import { parseSSEStream, mapDBCommandToFetch, mapResponseToDBEvent } from './http-client.js';
+import {
+  formatDaemonError,
+  parseSSEStream,
+  mapDBCommandToFetch,
+  mapResponseToDBEvent,
+} from './http-client.js';
 
 /** 从 IPC 获取 daemon 端口号 */
 async function getDaemonPort(): Promise<number | null> {
@@ -21,6 +26,7 @@ async function requireDaemonPort(): Promise<number> {
 let currentSSEReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
 let chatEventListener: ((event: ChatEvent) => void) | null = null;
 let dbEventListener: ((event: DBEvent) => void) | null = null;
+let daemonStatusSubscriptionSeq = 0;
 
 /** 发起 turn（POST /turns），返回 SSE stream 的 reader */
 async function startTurnStream(
@@ -35,7 +41,7 @@ async function startTurnStream(
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
-    throw new Error(error.error || `Turn request failed with status ${response.status}`);
+    throw new Error(formatDaemonError(response.status, error));
   }
 
   if (!response.body) {
@@ -54,12 +60,15 @@ contextBridge.exposeInMainWorld('cashew', {
   subscribeDaemonStatus: (
     listener: (status: DaemonStatus) => void,
   ): (() => void) => {
-    ipcRenderer.send('cashew:daemon-status-subscribe');
+    const subscriptionId = `daemon-status-${daemonStatusSubscriptionSeq++}`;
+    ipcRenderer.send('cashew:daemon-status-subscribe', subscriptionId);
 
     const handler = (
       _event: Electron.IpcRendererEvent,
+      eventSubscriptionId: string,
       status: DaemonStatus,
     ) => {
+      if (eventSubscriptionId !== subscriptionId) return;
       listener(status);
     };
 
@@ -67,6 +76,7 @@ contextBridge.exposeInMainWorld('cashew', {
 
     return () => {
       ipcRenderer.removeListener('cashew:daemon-status-changed', handler);
+      ipcRenderer.send('cashew:daemon-status-unsubscribe', subscriptionId);
     };
   },
 
@@ -126,10 +136,9 @@ contextBridge.exposeInMainWorld('cashew', {
 
   /** 发送数据库命令 */
   sendDBCommand: async (command: DBCommand): Promise<void> => {
-    const port = await requireDaemonPort();
-    const { url, method, body } = mapDBCommandToFetch(port, command);
-
     try {
+      const port = await requireDaemonPort();
+      const { url, method, body } = mapDBCommandToFetch(port, command);
       const response = await fetch(url, {
         method,
         headers: body ? { 'Content-Type': 'application/json' } : undefined,

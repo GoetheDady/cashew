@@ -82,7 +82,7 @@ function sessionManagerReducer(
  * - 管理当前激活的会话和对应的消息列表
  * - 监听数据库事件并更新状态
  */
-export function useSessionManager() {
+export function useSessionManager({ enabled = true }: { enabled?: boolean } = {}) {
   const [state, dispatch] = useReducer(sessionManagerReducer, {
     sessions: [],
     activeSessionId: null,
@@ -93,30 +93,55 @@ export function useSessionManager() {
 
   // 加载所有会话
   const loadSessions = useCallback(async () => {
+    if (!enabled) {
+      dispatch({ type: 'set_loading', isLoading: false });
+      return;
+    }
+
     dispatch({ type: 'set_loading', isLoading: true });
     await window.cashew.sendDBCommand({ type: 'get_all_sessions' });
-  }, []);
+  }, [enabled]);
 
   // 创建新会话
   const createSession = useCallback(async (title?: string) => {
+    if (!enabled) {
+      dispatch({ type: 'set_error', error: 'Cashew service is still starting.' });
+      return;
+    }
+
     await window.cashew.sendDBCommand({ type: 'create_session', title });
-  }, []);
+  }, [enabled]);
 
   // 切换激活会话
   const activateSession = useCallback(async (sessionId: string) => {
+    if (!enabled) {
+      dispatch({ type: 'set_error', error: 'Cashew service is still starting.' });
+      return;
+    }
+
     dispatch({ type: 'session_activated', sessionId });
     await window.cashew.sendDBCommand({ type: 'get_messages', sessionId });
-  }, []);
+  }, [enabled]);
 
   // 删除会话
   const deleteSession = useCallback(async (sessionId: string) => {
+    if (!enabled) {
+      dispatch({ type: 'set_error', error: 'Cashew service is still starting.' });
+      return;
+    }
+
     await window.cashew.sendDBCommand({ type: 'delete_session', sessionId });
-  }, []);
+  }, [enabled]);
 
   // 更新会话标题
   const updateSessionTitle = useCallback(async (sessionId: string, title: string) => {
+    if (!enabled) {
+      dispatch({ type: 'set_error', error: 'Cashew service is still starting.' });
+      return;
+    }
+
     await window.cashew.sendDBCommand({ type: 'update_session_title', sessionId, title });
-  }, []);
+  }, [enabled]);
 
   // 监听数据库事件
   useEffect(() => {
@@ -158,11 +183,14 @@ export function useSessionManager() {
       }
     });
 
-    // 初始加载会话列表
-    loadSessions();
+    if (enabled) {
+      loadSessions();
+    } else {
+      dispatch({ type: 'set_loading', isLoading: false });
+    }
 
     return unsubscribe;
-  }, [loadSessions]);
+  }, [enabled, loadSessions]);
 
   return {
     sessions: state.sessions,

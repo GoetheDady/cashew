@@ -1,8 +1,12 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'node:path';
 import { DaemonManager } from './daemon-manager.js';
+import { DaemonStatusSubscriptionRegistry } from './daemon-status-subscriptions.js';
 
 const daemonManager = new DaemonManager();
+const daemonStatusSubscriptions = new DaemonStatusSubscriptionRegistry((listener) =>
+  daemonManager.onStatusChange(listener),
+);
 
 // IPC: 渲染器获取 daemon 端口
 ipcMain.handle('cashew:daemon-port', () => {
@@ -14,16 +18,12 @@ ipcMain.handle('cashew:daemon-status', () => {
 });
 
 // IPC: 渲染器订阅 daemon 状态变更
-ipcMain.on('cashew:daemon-status-subscribe', (event) => {
-  const unsubscribe = daemonManager.onStatusChange((status) => {
-    if (!event.sender.isDestroyed()) {
-      event.sender.send('cashew:daemon-status-changed', status);
-    }
-  });
+ipcMain.on('cashew:daemon-status-subscribe', (event, subscriptionId: string) => {
+  daemonStatusSubscriptions.subscribe(event.sender, subscriptionId);
+});
 
-  event.sender.on('destroyed', () => {
-    unsubscribe();
-  });
+ipcMain.on('cashew:daemon-status-unsubscribe', (event, subscriptionId: string) => {
+  daemonStatusSubscriptions.unsubscribe(event.sender, subscriptionId);
 });
 
 const createWindow = () => {
