@@ -1,36 +1,28 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'node:path';
-import { AgentRuntime } from '@cashew/agent';
-import {
-  CHAT_COMMAND_CHANNEL,
-  CHAT_EVENT_CHANNEL,
-  DB_COMMAND_CHANNEL,
-  DB_EVENT_CHANNEL,
-  type ChatCommand,
-  type DBCommand,
-} from '@cashew/shared';
+import { DaemonManager } from './daemon-manager.js';
 
-const agentRuntime = new AgentRuntime({
-  isPackaged: app.isPackaged,
+const daemonManager = new DaemonManager();
+
+// IPC: 渲染器获取 daemon 端口
+ipcMain.handle('cashew:daemon-port', () => {
+  const status = daemonManager.getStatus();
+  return status.state === 'connected' ? status.port : null;
+});
+ipcMain.handle('cashew:daemon-status', () => {
+  return daemonManager.getStatus();
 });
 
-// 聊天命令处理
-ipcMain.handle(CHAT_COMMAND_CHANNEL, async (event, command: ChatCommand): Promise<void> => {
-  const windowId = event.sender.id;
-
-  await agentRuntime.handleCommand(windowId, command, (chatEvent) => {
+// IPC: 渲染器订阅 daemon 状态变更
+ipcMain.on('cashew:daemon-status-subscribe', (event) => {
+  const unsubscribe = daemonManager.onStatusChange((status) => {
     if (!event.sender.isDestroyed()) {
-      event.sender.send(CHAT_EVENT_CHANNEL, chatEvent);
+      event.sender.send('cashew:daemon-status-changed', status);
     }
   });
-});
 
-// 数据库命令处理
-ipcMain.handle(DB_COMMAND_CHANNEL, async (event, command: DBCommand): Promise<void> => {
-  agentRuntime.handleDBCommand(command, (dbEvent) => {
-    if (!event.sender.isDestroyed()) {
-      event.sender.send(DB_EVENT_CHANNEL, dbEvent);
-    }
+  event.sender.on('destroyed', () => {
+    unsubscribe();
   });
 });
 
@@ -44,11 +36,6 @@ const createWindow = () => {
       nodeIntegration: false,
     },
   });
-  const windowId = mainWindow.webContents.id;
-
-  mainWindow.on('closed', () => {
-    agentRuntime.destroyWindowSession(windowId);
-  });
 
   const rendererUrl = process.env.ELECTRON_RENDERER_URL;
 
@@ -61,7 +48,15 @@ const createWindow = () => {
   mainWindow.webContents.openDevTools();
 };
 
-app.on('ready', createWindow);
+app.on('ready', () => {
+  createWindow();
+  // 自动拉起 daemon
+  daemonManager.start();
+});
+
+app.on('before-quit', async () => {
+  await daemonManager.stop();
+});
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {

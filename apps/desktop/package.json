@@ -9,12 +9,15 @@
     "dev": "electron-vite dev",
     "start": "electron-vite dev",
     "build": "electron-vite build",
+    "build:daemon": "cd ../daemon && pnpm build",
     "preview": "electron-vite preview",
-    "package": "pnpm build && electron-builder --dir",
-    "make": "pnpm build && electron-builder",
+    "prepackage": "pnpm build && pnpm build:daemon",
+    "package": "pnpm prepackage && electron-builder --dir",
+    "make": "pnpm prepackage && electron-builder",
     "publish": "pnpm build && electron-builder --publish always",
     "lint": "eslint --ext .ts,.tsx .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "keywords": [],
   "author": {
@@ -27,6 +30,16 @@
     "directories": {
       "output": "release"
     },
+    "extraResources": [
+      {
+        "from": "../daemon/out",
+        "to": "daemon"
+      },
+      {
+        "from": "../daemon/package.json",
+        "to": "daemon/package.json"
+      }
+    ],
     "files": [
       "out/main/**/*",
       "out/preload/**/*",
@@ -68,11 +81,12 @@
     "eslint-plugin-import": "^2.32.0",
     "tailwindcss": "^4.3.0",
     "typescript": "^5.9.3",
-    "vite": "^5.4.21"
+    "vite": "^5.4.21",
+    "vitest": "^2.1.9"
   },
   "dependencies": {
-    "@cashew/agent": "workspace:*",
     "@cashew/shared": "workspace:*",
+    "@phosphor-icons/react": "^2.1.10",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"
   }

@@ -68,6 +68,13 @@ export function assertNever(value: never): never {
   throw new Error(`Unhandled value: ${JSON.stringify(value)}`);
 }
 
+// Daemon 连接状态类型
+export type DaemonStatus =
+  | { state: 'disconnected' }
+  | { state: 'connecting' }
+  | { state: 'connected'; port: number }
+  | { state: 'error'; message: string };
+
 // 数据库相关类型
 export interface DBSession {
   id: string;
