@@ -97,23 +97,23 @@ export type DaemonStatus =
   | { state: 'error'; message: string };
 
 // 数据库相关类型
-export interface DBSession {
+export interface Conversation {
   id: string;
   title: string;
-  created_at: number;
-  updated_at: number;
+  created_at: string | number;
+  updated_at: string | number;
 }
 
-export interface DBMessage {
+export interface ConversationMessage {
   id: string;
   session_id: string;
   role: 'user' | 'assistant';
   content: string;
-  created_at: number;
+  created_at: string | number;
 }
 
 // 数据库命令类型
-export type DBCommand =
+export type ConversationCommand =
   | { type: 'create_session'; title?: string }
   | { type: 'get_all_sessions' }
   | { type: 'get_session'; sessionId: string }
@@ -122,11 +122,11 @@ export type DBCommand =
   | { type: 'update_session_title'; sessionId: string; title: string };
 
 // 数据库事件类型
-export type DBEvent =
-  | { type: 'session_created'; session: DBSession }
-  | { type: 'sessions_loaded'; sessions: DBSession[] }
-  | { type: 'session_loaded'; session: DBSession | null }
+export type ConversationEvent =
+  | { type: 'session_created'; session: Conversation }
+  | { type: 'sessions_loaded'; sessions: Conversation[] }
+  | { type: 'session_loaded'; session: Conversation | null }
   | { type: 'session_deleted'; sessionId: string }
-  | { type: 'messages_loaded'; sessionId: string; messages: DBMessage[] }
+  | { type: 'messages_loaded'; sessionId: string; messages: ConversationMessage[] }
   | { type: 'session_title_updated'; sessionId: string; title: string }
   | { type: 'db_error'; error: string };

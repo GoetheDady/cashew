@@ -1,13 +1,12 @@
 import type { DaemonStatus } from '@cashew/shared';
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ChatWorkspace } from './components/chat-workspace';
 import { ConversationSidebar } from './components/conversation-sidebar';
-import { useChatSession } from './hooks/chat-session';
-import { useSessionManager } from './hooks/session-manager';
-import { fetchChatConfig, saveChatConfig } from './lib/chat-config';
+import { useActiveConversation } from './hooks/active-conversation';
+import { normalizeChatConfig } from './lib/chat-config';
 import { getEffectiveLevels, MODELS, type ThinkingLevel } from './lib/model-options';
-import { resolveConversationIdForSend } from './lib/session-send';
+import { ConversationSendCoordinator } from './lib/conversation-send';
 
 type ChatPageProps = {
   daemonStatus: DaemonStatus;
@@ -20,56 +19,40 @@ export function ChatPage({ daemonStatus, isConnected, onReconnect }: ChatPagePro
   const { sessionId: routeSessionId } = useParams();
   const activeSessionId = routeSessionId ?? null;
   const {
-    sessions,
-    messages: dbMessages,
+    conversations: sessions,
+    activeConversation: activeSession,
+    messages: displayMessages,
     isLoading,
-    error: sessionError,
-    createSession,
-    activateSession,
-    deleteSession,
-    applySessionTitle,
-  } = useSessionManager({ enabled: isConnected, activeSessionId });
-
-  const {
-    messages,
     isSending,
     isThinking,
     thinkingContent,
-    titleEvent,
-    error: chatError,
+    error: latestError,
+    createConversation: createSession,
+    deleteConversation: deleteSession,
     sendPrompt,
     cancelCurrentTurn,
-  } = useChatSession(window.cashew, { sessionId: activeSessionId });
+  } = useActiveConversation({
+    enabled: isConnected,
+    conversationId: activeSessionId,
+  });
 
   const [prompt, setPrompt] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel>('off');
   const [selectedModel, setSelectedModel] = useState<string>(MODELS[0].id);
-  const [pendingPrompt, setPendingPrompt] = useState<{
-    content: string;
-    sessionId: string;
-  } | null>(null);
+  const sendCoordinator = useRef<ConversationSendCoordinator | null>(null);
+  const sendDependencies = { createConversation: createSession, navigate, sendPrompt };
+  if (!sendCoordinator.current) {
+    sendCoordinator.current = new ConversationSendCoordinator(sendDependencies);
+  } else {
+    sendCoordinator.current.updateDependencies(sendDependencies);
+  }
 
   useEffect(() => {
     if (isConnected && activeSessionId) {
-      activateSession(activeSessionId);
+      sendCoordinator.current?.activate(activeSessionId);
     }
-  }, [activeSessionId, activateSession, isConnected]);
-
-  useEffect(() => {
-    if (!pendingPrompt || activeSessionId !== pendingPrompt.sessionId) {
-      return;
-    }
-
-    setPendingPrompt(null);
-    sendPrompt(pendingPrompt.content, pendingPrompt.sessionId);
-  }, [activeSessionId, pendingPrompt, sendPrompt]);
-
-  useEffect(() => {
-    if (!titleEvent) return;
-
-    applySessionTitle(titleEvent.sessionId, titleEvent.title);
-  }, [applySessionTitle, titleEvent]);
+  }, [activeSessionId, isConnected]);
 
   useEffect(() => {
     if (!isConnected) return;
@@ -78,9 +61,7 @@ export function ChatPage({ daemonStatus, isConnected, onReconnect }: ChatPagePro
 
     async function loadChatConfig() {
       try {
-        const port = await window.cashew.getDaemonPort();
-        if (!port) return;
-        const config = await fetchChatConfig(port);
+        const config = normalizeChatConfig(await window.cashew.getChatConfig());
         if (cancelled) return;
 
         setSelectedModel(config.model);
@@ -101,9 +82,7 @@ export function ChatPage({ daemonStatus, isConnected, onReconnect }: ChatPagePro
     async (updates: { thinkingLevel?: ThinkingLevel; model?: string }) => {
       if (!isConnected) return;
       try {
-        const port = await window.cashew.getDaemonPort();
-        if (!port) return;
-        await saveChatConfig(port, updates);
+        await window.cashew.saveChatConfig(updates);
       } catch {
         // 配置更新失败不影响发送消息。
       }
@@ -159,23 +138,9 @@ export function ChatPage({ daemonStatus, isConnected, onReconnect }: ChatPagePro
     const content = prompt.trim();
     if (!content || isSending || !isConnected) return;
 
-    const sessionId = await resolveConversationIdForSend(activeSessionId, createSession);
-    if (!sessionId) return;
-
-    setPrompt('');
-
-    if (sessionId !== activeSessionId) {
-      setPendingPrompt({ content, sessionId });
-      navigate(`/chat/${sessionId}`);
-      return;
-    }
-
-    await sendPrompt(content, sessionId);
+    const accepted = await sendCoordinator.current?.send(activeSessionId, content);
+    if (accepted) setPrompt('');
   }
-
-  const activeSession = sessions.find((session) => session.id === activeSessionId);
-  const displayMessages = activeSessionId ? [...dbMessages, ...messages] : messages;
-  const latestError = chatError || sessionError;
 
   return (
     <main className="chat-page-shell flex h-screen w-screen min-h-0 min-w-0 flex-col overflow-hidden bg-[linear-gradient(180deg,rgba(255,253,249,0.96),rgba(250,246,239,0.96))] text-foreground">

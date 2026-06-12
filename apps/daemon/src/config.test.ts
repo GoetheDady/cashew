@@ -4,7 +4,7 @@ import { Hono } from 'hono';
 import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { createConfigRoutes } from './config.js';
+import { createConfigRoutes, createDaemonConfiguration } from './config.js';
 
 /**
  * Issue 02: Daemon 配置加载
@@ -15,10 +15,11 @@ import { createConfigRoutes } from './config.js';
 
 function createTestApp(configPath: string): Hono {
   const app = new Hono();
-  createConfigRoutes(app, configPath, {
+  const configuration = createDaemonConfiguration(configPath, {
     fallbackToDevelopmentEnv: false,
     env: {},
   });
+  createConfigRoutes(app, configuration);
   return app;
 }
 
@@ -139,6 +140,34 @@ describe('loadConfig', () => {
         model: 'deepseek-v4-flash',
         apiKey: 'sk-from-env-file',
         thinkingLevel: 'minimal',
+      });
+    } finally {
+      rmSync(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('uses the same development fallback for config reads and partial updates', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'cashew-config-owner-test-'));
+    const desktopDir = join(workspaceRoot, 'apps', 'desktop');
+    const configPath = join(workspaceRoot, 'config.json');
+    mkdirSync(desktopDir, { recursive: true });
+    writeFileSync(join(desktopDir, '.env.local'), 'DEEPSEEK_API_KEY=sk-from-shared-owner\n');
+
+    const configuration = createDaemonConfiguration(configPath, {
+      fallbackToDevelopmentEnv: true,
+      cwd: workspaceRoot,
+      env: {},
+    });
+
+    try {
+      expect(configuration.get()?.apiKey).toBe('sk-from-shared-owner');
+      expect(configuration.update({ thinkingLevel: 'high' })).toMatchObject({
+        apiKey: 'sk-from-shared-owner',
+        thinkingLevel: 'high',
+      });
+      expect(configuration.get()).toMatchObject({
+        apiKey: 'sk-from-shared-owner',
+        thinkingLevel: 'high',
       });
     } finally {
       rmSync(workspaceRoot, { recursive: true, force: true });

@@ -12,7 +12,10 @@ export type DaemonConfigResponse = Partial<{
   thinkingLevel: string;
 }> | null;
 
-export function normalizeChatConfig(config: DaemonConfigResponse): ChatConfig {
+export function normalizeChatConfig(input: unknown): ChatConfig {
+  const config = typeof input === 'object' && input !== null
+    ? input as Exclude<DaemonConfigResponse, null>
+    : null;
   const model = typeof config?.model === 'string' && config.model
     ? config.model
     : MODELS[0].id;
@@ -23,28 +26,4 @@ export function normalizeChatConfig(config: DaemonConfigResponse): ChatConfig {
     : 'off';
 
   return { model, thinkingLevel };
-}
-
-export async function fetchChatConfig(port: number): Promise<ChatConfig> {
-  const response = await fetch(`http://localhost:${port}/config`);
-  const config = await response.json() as DaemonConfigResponse;
-  return normalizeChatConfig(config);
-}
-
-export async function saveChatConfig(
-  port: number,
-  updates: Partial<ChatConfig>,
-): Promise<void> {
-  const response = await fetch(`http://localhost:${port}/config`);
-  const current = await response.json() as DaemonConfigResponse;
-  const merged = {
-    ...(current || {}),
-    ...updates,
-  };
-
-  await fetch(`http://localhost:${port}/config`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(merged),
-  });
 }

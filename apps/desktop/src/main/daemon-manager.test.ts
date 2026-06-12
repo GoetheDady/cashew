@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ChildProcess } from 'node:child_process';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DaemonManager } from './daemon-manager';
+import { DaemonManager, resolvePackagedDaemonCommand } from './daemon-manager';
 import type { DaemonStatus } from '@cashew/shared';
 
 vi.mock('electron', () => ({
@@ -112,5 +112,44 @@ describe('DaemonManager', () => {
     expect(manager.getStatus()).toEqual({ state: 'connecting' });
 
     await manager.stop();
+  });
+
+  it('reuses an independently running Daemon when reconnecting', async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'cashew-daemon-manager-test-'));
+    tmpDirs.push(tmpDir);
+    const portFilePath = join(tmpDir, 'daemon.port');
+    writeFileSync(portFilePath, '4567', 'utf-8');
+    const spawnDaemon = vi.fn(fakeChildProcess);
+    const manager = new DaemonManager({
+      portFilePath,
+      checkHealth: async (port) => port === 4567,
+      spawnDaemon,
+    });
+
+    await manager.start();
+    await manager.reconnect();
+
+    expect(spawnDaemon).not.toHaveBeenCalled();
+    expect(manager.getStatus()).toEqual({ state: 'connected', port: 4567 });
+
+    await manager.stop();
+  });
+});
+
+describe('packaged Daemon command', () => {
+  it('fails clearly when the bundled Node runtime is missing', () => {
+    expect(() => resolvePackagedDaemonCommand('/resources', () => false)).toThrow(
+      'Cashew 安装包缺少内置 Node runtime',
+    );
+  });
+
+  it('runs the packaged Daemon with the bundled Node runtime', () => {
+    expect(resolvePackagedDaemonCommand('/resources', () => true)).toEqual({
+      command: process.platform === 'win32'
+        ? '/resources/node/bin/node.exe'
+        : '/resources/node/bin/node',
+      args: ['index.js'],
+      cwd: '/resources/daemon',
+    });
   });
 });

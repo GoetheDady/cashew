@@ -1,4 +1,4 @@
-import type { ChatEvent, DBCommand, DBEvent, DBSession, DBMessage } from '@cashew/shared';
+import type { ConversationCommand, ConversationEvent, Conversation, ConversationMessage } from '@cashew/shared';
 
 function getErrorMessage(data: unknown): string | null {
   if (typeof data !== 'object' || data === null || !('error' in data)) {
@@ -7,6 +7,43 @@ function getErrorMessage(data: unknown): string | null {
 
   const { error } = data as { error?: unknown };
   return typeof error === 'string' ? error : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function parseSession(data: unknown): Conversation {
+  if (
+    !isRecord(data) ||
+    typeof data.id !== 'string' ||
+    typeof data.title !== 'string' ||
+    !['string', 'number'].includes(typeof data.created_at) ||
+    !['string', 'number'].includes(typeof data.updated_at)
+  ) {
+    throw new Error('Daemon 返回了无效的 Conversation。');
+  }
+  return data as unknown as Conversation;
+}
+
+function parseMessage(data: unknown): ConversationMessage {
+  if (
+    !isRecord(data) ||
+    typeof data.id !== 'string' ||
+    typeof data.conversation_id !== 'string' ||
+    (data.role !== 'user' && data.role !== 'assistant') ||
+    typeof data.content !== 'string' ||
+    !['string', 'number'].includes(typeof data.created_at)
+  ) {
+    throw new Error('Daemon 返回了无效的 Conversation 消息。');
+  }
+  return {
+    id: data.id,
+    session_id: data.conversation_id,
+    role: data.role,
+    content: data.content,
+    created_at: data.created_at as string | number,
+  };
 }
 
 export function formatDaemonError(status: number, data: unknown): string {
@@ -83,14 +120,14 @@ export async function readSSEStream(
   const decoder = new TextDecoder();
   let buffer = '';
 
-  while (true) {
+  for (;;) {
     const { done, value } = await reader.read();
     if (value) {
       buffer += decoder.decode(value, { stream: !done });
     }
 
     // 从 buffer 中提取所有完整的 SSE 消息（以 \n\n 分隔）
-    while (true) {
+    for (;;) {
       const { event, consumed } = parseSSEEvent(buffer);
       if (!event) break;
       buffer = buffer.slice(consumed);
@@ -112,9 +149,9 @@ export async function readSSEStream(
 /**
  * DB command → HTTP 请求映射。
  */
-export function mapDBCommandToFetch(
+export function mapConversationCommandToFetch(
   port: number,
-  command: DBCommand,
+  command: ConversationCommand,
 ): { url: string; method: string; body?: string } {
   const base = `http://localhost:${port}`;
 
@@ -151,28 +188,30 @@ export function mapDBCommandToFetch(
 }
 
 /**
- * 将 HTTP 响应数据映射为 DBEvent。
+ * 将 HTTP 响应数据映射为 ConversationEvent。
  * 不同 daemon 端点返回不同的形状，此处做适配。
  */
-export function mapResponseToDBEvent(
-  command: DBCommand,
+export function mapResponseToConversationEvent(
+  command: ConversationCommand,
   data: unknown,
-): DBEvent | null {
+): ConversationEvent | null {
   switch (command.type) {
     case 'create_session':
-      return { type: 'session_created', session: data as DBSession };
+      return { type: 'session_created', session: parseSession(data) };
 
     case 'get_all_sessions':
-      return { type: 'sessions_loaded', sessions: data as DBSession[] };
+      if (!Array.isArray(data)) throw new Error('Daemon 返回了无效的 Conversation History。');
+      return { type: 'sessions_loaded', sessions: data.map(parseSession) };
 
     case 'get_session':
-      return { type: 'session_loaded', session: data as DBSession | null };
+      return { type: 'session_loaded', session: data === null ? null : parseSession(data) };
 
     case 'delete_session':
       return { type: 'session_deleted', sessionId: command.sessionId };
 
     case 'get_messages':
-      return { type: 'messages_loaded', sessionId: command.sessionId, messages: data as DBMessage[] };
+      if (!Array.isArray(data)) throw new Error('Daemon 返回了无效的 Conversation 消息列表。');
+      return { type: 'messages_loaded', sessionId: command.sessionId, messages: data.map(parseMessage) };
 
     case 'update_session_title':
       return null; // 渲染器不依赖这个事件

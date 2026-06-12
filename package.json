@@ -31,8 +31,5 @@
       "macos-alias",
       "protobufjs"
     ]
-  },
-  "dependencies": {
-    "electron-store": "^11.0.2"
   }
 }

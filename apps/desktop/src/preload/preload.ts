@@ -1,10 +1,10 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { ChatCommand, ChatEvent, DBCommand, DBEvent, DaemonStatus } from '@cashew/shared';
+import type { ChatCommand, ChatEvent, ConversationCommand, ConversationEvent, DaemonStatus } from '@cashew/shared';
 import {
   formatDaemonError,
   readSSEStream,
-  mapDBCommandToFetch,
-  mapResponseToDBEvent,
+  mapConversationCommandToFetch,
+  mapResponseToConversationEvent,
 } from './http-client.js';
 
 /** 从 IPC 获取 daemon 端口号 */
@@ -25,7 +25,7 @@ async function requireDaemonPort(): Promise<number> {
  */
 let currentSSEReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
 let chatEventListener: ((event: ChatEvent) => void) | null = null;
-let dbEventListener: ((event: DBEvent) => void) | null = null;
+let conversationEventListener: ((event: ConversationEvent) => void) | null = null;
 let daemonStatusSubscriptionSeq = 0;
 
 /** 发起 turn（POST /turns），返回 SSE stream 的 reader */
@@ -67,6 +67,24 @@ contextBridge.exposeInMainWorld('cashew', {
   /** 清理旧连接并重新拉起 daemon */
   reconnectDaemon: (): Promise<void> =>
     ipcRenderer.invoke('cashew:daemon-reconnect'),
+
+  getChatConfig: async (): Promise<unknown> => {
+    const port = await requireDaemonPort();
+    const response = await fetch(`http://localhost:${port}/config`);
+    return response.json();
+  },
+
+  saveChatConfig: async (updates: Record<string, unknown>): Promise<void> => {
+    const port = await requireDaemonPort();
+    const response = await fetch(`http://localhost:${port}/config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    });
+    if (!response.ok) {
+      throw new Error(formatDaemonError(response.status, await response.json().catch(() => ({}))));
+    }
+  },
 
   /** 订阅 daemon 状态变更 */
   subscribeDaemonStatus: (
@@ -134,17 +152,17 @@ contextBridge.exposeInMainWorld('cashew', {
     return () => {
       chatEventListener = null;
       if (currentSSEReader) {
-        currentSSEReader.cancel().catch(() => {});
+        currentSSEReader.cancel().catch(() => undefined);
         currentSSEReader = null;
       }
     };
   },
 
   /** 发送数据库命令 */
-  sendDBCommand: async (command: DBCommand): Promise<DBEvent | null> => {
+  sendConversationCommand: async (command: ConversationCommand): Promise<ConversationEvent | null> => {
     try {
       const port = await requireDaemonPort();
-      const { url, method, body } = mapDBCommandToFetch(port, command);
+      const { url, method, body } = mapConversationCommandToFetch(port, command);
       const response = await fetch(url, {
         method,
         headers: body ? { 'Content-Type': 'application/json' } : undefined,
@@ -156,7 +174,7 @@ contextBridge.exposeInMainWorld('cashew', {
       if (!response.ok) {
         // daemon 返回了错误状态码（如 404 Session not found），
         // 抛出错误以便 catch 分支统一处理为 db_error 事件，
-        // 避免 error 对象被 mapResponseToDBEvent 强制转型为业务数据。
+        // 避免 error 对象被 mapResponseToConversationEvent 强制转型为业务数据。
         const message =
           typeof data === 'object' && data !== null && 'error' in data &&
           typeof (data as Record<string, unknown>).error === 'string'
@@ -165,28 +183,28 @@ contextBridge.exposeInMainWorld('cashew', {
         throw new Error(message as string);
       }
 
-      if (dbEventListener) {
-        const event = mapResponseToDBEvent(command, data);
-        if (event) dbEventListener(event);
+      if (conversationEventListener) {
+        const event = mapResponseToConversationEvent(command, data);
+        if (event) conversationEventListener(event);
         return event;
       }
 
-      return mapResponseToDBEvent(command, data);
+      return mapResponseToConversationEvent(command, data);
     } catch (error) {
-      const event: DBEvent = {
+      const event: ConversationEvent = {
         type: 'db_error',
         error: error instanceof Error ? error.message : '未知数据库错误',
       };
-      if (dbEventListener) {
-        dbEventListener(event);
+      if (conversationEventListener) {
+        conversationEventListener(event);
       }
       return event;
     }
   },
 
   /** 订阅数据库事件 */
-  subscribeDBEvents: (listener: (event: DBEvent) => void): (() => void) => {
-    dbEventListener = listener;
-    return () => { dbEventListener = null; };
+  subscribeConversationEvents: (listener: (event: ConversationEvent) => void): (() => void) => {
+    conversationEventListener = listener;
+    return () => { conversationEventListener = null; };
   },
 });

@@ -3,11 +3,10 @@ import type { AgentEvent } from '@earendil-works/pi-agent-core';
 import { complete, getModel, registerBuiltInApiProviders } from '@earendil-works/pi-ai';
 import type { Context, ProviderStreamOptions } from '@earendil-works/pi-ai';
 import { Hono } from 'hono';
-import type Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
 import type { ChatEvent, ChatTurnId } from '@cashew/shared';
 import { loadConfig, type DaemonConfig } from './config.js';
-import { DEFAULT_CONFIG_PATH } from './app.js';
+import type { ConversationPersistence } from './database.js';
 
 // 重新导出 config 类型，方便外部使用
 export type { DaemonConfig };
@@ -136,12 +135,17 @@ async function defaultGenerateTitle({
 // ---------- SessionManager 接口 ----------
 
 export interface AgentSessionManager {
-  getOrCreate(config: DaemonConfig, sessionId?: string): {
-    startTurn(promptInput: string, emit: ChatEventSink): Promise<void>;
-    cancelTurn(): void;
+  startTurn(
+    config: DaemonConfig,
+    sessionId: string | undefined,
+    prompt: string,
+    emit: ChatEventSink,
+  ): {
     turnId: ChatTurnId;
     sessionId: string;
+    completed: Promise<void>;
   };
+  cancelTurn(turnId: ChatTurnId): boolean;
 }
 
 // ---------- AgentSession 实现 ----------
@@ -181,9 +185,8 @@ class AgentSessionImpl {
     this.agent.subscribe((event) => this.handleAgentEvent(event));
   }
 
-  async startTurn(promptInput: string, emit: ChatEventSink): Promise<void> {
+  async startTurn(promptInput: string, emit: ChatEventSink, turnId: ChatTurnId): Promise<void> {
     const prompt = promptInput.trim();
-    const turnId = randomUUID();
 
     if (!prompt) {
       throw new TurnError('prompt_empty', 'Prompt is empty.', turnId);
@@ -319,9 +322,15 @@ class TurnError extends Error {
 
 export class DefaultSessionManager implements AgentSessionManager {
   private sessions = new Map<string, AgentSessionImpl>();
+  private activeTurns = new Map<ChatTurnId, AgentSessionImpl>();
   constructor(private createAgent: CreateAgentFn = defaultCreateAgent) {}
 
-  getOrCreate(config: DaemonConfig, sessionId?: string) {
+  startTurn(
+    config: DaemonConfig,
+    sessionId: string | undefined,
+    prompt: string,
+    emit: ChatEventSink,
+  ) {
     // 按 sessionId 维护独立的 Agent 实例
     const key = sessionId || 'default';
     let session = this.sessions.get(key);
@@ -334,43 +343,112 @@ export class DefaultSessionManager implements AgentSessionManager {
       session.syncConfig(config);
     }
     const turnId = randomUUID();
+    this.activeTurns.set(turnId, session);
+    const completed = session.startTurn(prompt, emit, turnId)
+      .finally(() => this.activeTurns.delete(turnId));
     return {
       turnId,
       sessionId: session.sessionId,
-      startTurn(p: string, e: ChatEventSink) { return session!.startTurn(p, e); },
-      cancelTurn() { session!.cancelTurn(); },
+      completed,
     };
+  }
+
+  cancelTurn(turnId: ChatTurnId): boolean {
+    const session = this.activeTurns.get(turnId);
+    if (!session) return false;
+    session.cancelTurn();
+    return true;
   }
 }
 
-// ---------- Hono 路由 ----------
+// ---------- Turn workflow ----------
+
+export class TurnWorkflow {
+  constructor(
+    private readonly persistence: ConversationPersistence,
+    private readonly sessionManager: AgentSessionManager,
+    private readonly getConfig: () => DaemonConfig | null,
+    private readonly generateTitle: GenerateTitleFn = defaultGenerateTitle,
+  ) {}
+
+  start(
+    prompt: string,
+    sessionId: string | undefined,
+    emit: ChatEventSink,
+  ): { turnId: ChatTurnId; sessionId: string; completed: Promise<void> } {
+    const config = this.getConfig();
+    if (!config) {
+      const turnId = randomUUID();
+      return {
+        turnId,
+        sessionId: sessionId ?? 'default',
+        completed: Promise.resolve(emit({
+          type: 'turn_failed',
+          turnId,
+          code: 'missing_api_key',
+          message: 'Cashew 尚未完成配置，请先添加模型服务商、模型和 API 密钥。',
+        })).then(() => undefined),
+      };
+    }
+
+    let userMessage: { id: string; content: string; createdAt: string } | undefined;
+    let lastEvent: ChatEvent | null = null;
+    const conversationId = sessionId ?? 'default';
+    const shouldGenerateTitle = this.persistence.shouldGenerateTitle(conversationId);
+    const turn = this.sessionManager.startTurn(config, sessionId, prompt, async (event) => {
+      if (event.type === 'turn_started') {
+        userMessage = {
+          id: event.message.id,
+          content: event.message.content,
+          createdAt: event.message.createdAt,
+        };
+      }
+      lastEvent = event;
+      await emit(event);
+    });
+
+    const completed = turn.completed.then(async () => {
+      const finalEvent: ChatEvent | null = lastEvent;
+      if (finalEvent?.type !== 'turn_completed' || !userMessage) return;
+
+      this.persistence.saveCompletedTurn(turn.sessionId, userMessage, finalEvent.message);
+      if (!shouldGenerateTitle) return;
+
+      const title = await createSessionTitle({
+        config,
+        prompt: userMessage.content,
+        assistantText: finalEvent.message.content,
+        generateTitle: this.generateTitle,
+      });
+      this.persistence.saveTitle(turn.sessionId, title);
+      await emit({
+        type: 'title',
+        sessionId: turn.sessionId,
+        turnId: finalEvent.turnId,
+        title,
+      });
+    });
+
+    return { ...turn, completed };
+  }
+
+  cancel(turnId: ChatTurnId): boolean {
+    return this.sessionManager.cancelTurn(turnId);
+  }
+}
+
+// ---------- Hono SSE adapter ----------
 
 export function createTurnRoutes(
   app: Hono,
-  db: Database.Database,
+  persistence: ConversationPersistence,
   sessionManager?: AgentSessionManager,
-  getConfig?: () => DaemonConfig | null,
+  getConfig: () => DaemonConfig | null = () => null,
   generateTitle: GenerateTitleFn = defaultGenerateTitle,
 ): void {
   const sm = sessionManager ?? new DefaultSessionManager();
-  const cfg = getConfig ?? (() => loadConfig(DEFAULT_CONFIG_PATH, {
-    fallbackToDevelopmentEnv: true,
-  }));
-
-  function sseEventResponse(event: ChatEvent): Response {
-    const encoder = new TextEncoder();
-    return new Response(
-      encoder.encode(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`),
-      {
-        headers: {
-          'Content-Type': 'text/event-stream',
-          'Cache-Control': 'no-cache',
-          Connection: 'keep-alive',
-          'Access-Control-Allow-Origin': '*',
-        },
-      },
-    );
-  }
+  const cfg = getConfig;
+  const workflow = new TurnWorkflow(persistence, sm, cfg, generateTitle);
 
   app.post('/turns', async (c) => {
     const body = await c.req.json().catch(() => ({}));
@@ -381,72 +459,18 @@ export function createTurnRoutes(
     const sessionId: string | undefined =
       typeof body.sessionId === 'string' && body.sessionId ? body.sessionId : undefined;
 
-    const config = cfg();
-    if (!config) {
-      return sseEventResponse({
-        type: 'turn_failed',
-        turnId: randomUUID(),
-        code: 'missing_api_key',
-        message:
-          'Cashew 尚未完成配置，请先添加模型服务商、模型和 API 密钥。',
-      });
-    }
-
-    const turn = sm.getOrCreate(config, sessionId);
-
     // 使用 Web Streams 手动实现 SSE
     const { readable, writable } = new TransformStream();
     const writer = writable.getWriter();
     const encoder = new TextEncoder();
 
-    let completed = false;
-    let lastEvent: ChatEvent | null = null;
-    // 在 SSE emit 回调中捕获 turn_started 里的用户消息，
-    // 以便 turn 完成后与 assistant 消息一同持久化到 SQLite
-    let userMessage: { id: string; content: string; createdAt: string } | undefined;
-    const shouldGenerateTitle = shouldGenerateTitleForSession(db, turn.sessionId ?? 'default');
-
-    // 在后台启动 agent turn
-    turn.startTurn(prompt, async (event) => {
-      if (event.type === 'turn_started') {
-        userMessage = {
-          id: event.message.id,
-          content: event.message.content,
-          createdAt: event.message.createdAt,
-        };
-      }
+    const turn = workflow.start(prompt, sessionId, async (event) => {
       await writer.write(
         encoder.encode(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`),
       );
-      if (
-        event.type === 'turn_completed' ||
-        event.type === 'turn_failed' ||
-        event.type === 'turn_cancelled'
-      ) {
-        completed = true;
-      }
-      lastEvent = event;
-    }).then(async () => {
-      if (completed && lastEvent) {
-        persistTurnMessages(db, turn.sessionId ?? 'default', lastEvent, userMessage);
-        if (lastEvent.type === 'turn_completed' && shouldGenerateTitle && userMessage) {
-          const title = await createSessionTitle({
-            config,
-            prompt: userMessage.content,
-            assistantText: lastEvent.message.content,
-            generateTitle,
-          });
-          persistSessionTitle(db, turn.sessionId ?? 'default', title);
-          await writer.write(
-            encoder.encode(`event: title\ndata: ${JSON.stringify({
-              type: 'title',
-              sessionId: turn.sessionId ?? 'default',
-              turnId: lastEvent.turnId,
-              title,
-            } satisfies ChatEvent)}\n\n`),
-          );
-        }
-      }
+    });
+
+    turn.completed.then(async () => {
       await writer.close();
     }).catch(async (err) => {
       console.error('[agent] turn error:', err);
@@ -464,15 +488,7 @@ export function createTurnRoutes(
   });
 
   app.post('/turns/:id/cancel', async (c) => {
-    const config = cfg();
-    if (!config) return c.json({ error: '未找到配置信息。' }, 400);
-    // cancel 时尝试从 body 读取 sessionId 以定位正确的 Agent 实例
-    const body = await c.req.json().catch(() => ({}));
-    const sessionId: string | undefined =
-      typeof body.sessionId === 'string' && body.sessionId ? body.sessionId : undefined;
-    const turn = sm.getOrCreate(config, sessionId);
-    turn.cancelTurn();
-    return c.json({ ok: true });
+    return c.json({ ok: workflow.cancel(c.req.param('id')) });
   });
 }
 
@@ -493,56 +509,4 @@ async function createSessionTitle({
   } catch {
     return fallbackTitleFromPrompt(prompt);
   }
-}
-
-function shouldGenerateTitleForSession(db: Database.Database, sessionId: string): boolean {
-  const session = db.prepare('SELECT title FROM conversations WHERE id = ?').get(sessionId) as
-    | { title: string }
-    | undefined;
-
-  if (!session) return true;
-
-  const messageCount = db.prepare('SELECT COUNT(*) as count FROM messages WHERE conversation_id = ?')
-    .get(sessionId) as { count: number };
-
-  return messageCount.count === 0 &&
-    (!session.title.trim() || session.title === 'New Chat' || session.title === '新对话');
-}
-
-function persistTurnMessages(
-  db: Database.Database,
-  sessionId: string,
-  event: ChatEvent,
-  userMessage?: { id: string; content: string; createdAt: string },
-): void {
-  if (event.type !== 'turn_completed') return;
-
-  const existing = db.prepare('SELECT id FROM conversations WHERE id = ?').get(sessionId);
-  if (!existing) {
-    const now = new Date().toISOString();
-    db.prepare('INSERT INTO conversations (id, title, created_at, updated_at) VALUES (?,?,?,?)')
-      .run(sessionId, '新对话', now, now);
-  }
-
-  // 持久化用户消息（turn_started 中 emit 的消息，此前漏掉未保存）
-  if (userMessage) {
-    db.prepare('INSERT INTO messages (id, conversation_id, role, content, created_at) VALUES (?,?,?,?,?)')
-      .run(userMessage.id, sessionId, 'user', userMessage.content, userMessage.createdAt);
-  }
-
-  // 持久化 assistant 消息
-  db.prepare('INSERT INTO messages (id, conversation_id, role, content, created_at) VALUES (?,?,?,?,?)')
-    .run(event.message.id, sessionId, 'assistant', event.message.content, event.message.createdAt);
-
-  db.prepare('UPDATE conversations SET updated_at = ? WHERE id = ?')
-    .run(new Date().toISOString(), sessionId);
-}
-
-function persistSessionTitle(
-  db: Database.Database,
-  sessionId: string,
-  title: string,
-): void {
-  db.prepare('UPDATE conversations SET title = ?, updated_at = ? WHERE id = ?')
-    .run(title, new Date().toISOString(), sessionId);
 }

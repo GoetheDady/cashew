@@ -13,6 +13,7 @@ export interface ChatSessionState {
   currentTurnId: ChatTurnId | null;
   error: string | null;
   titleEvent: Extract<ChatEvent, { type: 'title' }> | null;
+  completedTurnId: ChatTurnId | null;
   /** 当前 turn 是否正在输出思考内容 */
   isThinking: boolean;
   /** 当前 turn 的思考内容（思考结束后保留，供 UI 折叠展示） */
@@ -40,6 +41,7 @@ export const initialChatSessionState: ChatSessionState = {
   currentTurnId: null,
   error: null,
   titleEvent: null,
+  completedTurnId: null,
   isThinking: false,
   thinkingContent: '',
 };
@@ -83,6 +85,24 @@ export function chatSessionReducer(
   }
 
   const { event } = action;
+
+  if (
+    event.type === 'turn_started' &&
+    state.sessionId !== null &&
+    event.sessionId !== state.sessionId
+  ) {
+    return state;
+  }
+
+  if (
+    event.type !== 'turn_started' &&
+    event.type !== 'session_ready' &&
+    event.type !== 'title' &&
+    state.sessionId !== null &&
+    state.currentTurnId !== event.turnId
+  ) {
+    return state;
+  }
 
   switch (event.type) {
     case 'session_ready':
@@ -150,6 +170,7 @@ export function chatSessionReducer(
         ),
         isSending: false,
         currentTurnId: null,
+        completedTurnId: event.turnId,
       };
 
     case 'title':

@@ -1,4 +1,4 @@
-import type { DaemonStatus, DBSession } from '@cashew/shared';
+import type { DaemonStatus, Conversation } from '@cashew/shared';
 import { RotateCw, Search, Settings, Sparkles, SquarePen, X } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Button } from '../../../components/ui/button';
@@ -7,7 +7,7 @@ import { cn } from '../../../lib/utils';
 import { formatDay, formatTime } from '../lib/chat-formatters';
 
 type ConversationSidebarProps = {
-  sessions: DBSession[];
+  sessions: Conversation[];
   activeSessionId: string | null;
   searchTerm: string;
   isLoading: boolean;
@@ -35,7 +35,7 @@ export function ConversationSidebar({
     session.title.toLowerCase().includes(searchTerm.trim().toLowerCase()),
   );
 
-  const groupedSessions = filteredSessions.reduce<Record<string, DBSession[]>>(
+  const groupedSessions = filteredSessions.reduce<Record<string, Conversation[]>>(
     (groups, session) => {
       const group = formatDay(session.updated_at);
       return {

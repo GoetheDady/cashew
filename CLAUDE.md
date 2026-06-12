@@ -21,14 +21,14 @@ Cashew is a desktop AI chat app built on Electron + React + TypeScript. Monorepo
 ### Workspace layout
 
 - `apps/desktop` — Electron app (main process, preload, renderer)
-- `packages/agent` — Agent runtime wrapping `@earendil-works/pi-agent-core` + DeepSeek
+- `apps/daemon` — independent Node.js Daemon owning the agent runtime and SQLite
 - `packages/shared` — Typed IPC protocol (`ChatCommand`, `ChatEvent`), message types, channel constants
 
 ### Data flow
 
 ```
 Renderer (React)
-  → sendChatCommand (IPC → preload)
+  → window.cashew (preload adapter)
     → HTTP POST /turns (SSE) → Daemon (Hono)
       → AgentSession.startTurn
         → pi-agent-core Agent → DeepSeek API

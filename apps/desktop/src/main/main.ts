@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'node:path';
 import { DaemonManager } from './daemon-manager.js';
 import { DaemonStatusSubscriptionRegistry } from './daemon-status-subscriptions.js';
+import { registerDesktopLifecycle } from './desktop-lifecycle.js';
 
 const daemonManager = new DaemonManager();
 const daemonStatusSubscriptions = new DaemonStatusSubscriptionRegistry((listener) =>
@@ -66,24 +67,9 @@ const createWindow = () => {
 
 };
 
-app.on('ready', () => {
-  createWindow();
-  // 自动拉起 daemon
-  daemonManager.start();
-});
-
-app.on('before-quit', async () => {
-  await daemonManager.stop();
-});
-
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit();
-  }
-});
-
-app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
-    createWindow();
-  }
+registerDesktopLifecycle(app, {
+  createWindow,
+  hasOpenWindows: () => BrowserWindow.getAllWindows().length > 0,
+  startDaemon: () => daemonManager.start(),
+  stopDaemon: () => daemonManager.stop(),
 });

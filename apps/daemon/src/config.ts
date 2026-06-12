@@ -18,6 +18,11 @@ export interface LoadConfigOptions {
   env?: NodeJS.ProcessEnv;
 }
 
+export interface DaemonConfiguration {
+  get(): DaemonConfig | null;
+  update(changes: Partial<DaemonConfig>): DaemonConfig;
+}
+
 /** 配置必须包含的字段 */
 const REQUIRED_FIELDS = ['provider', 'model', 'apiKey', 'thinkingLevel'] as const;
 
@@ -114,6 +119,33 @@ function saveConfig(configPath: string, config: DaemonConfig): void {
   writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
 }
 
+export function createDaemonConfiguration(
+  configPath: string,
+  loadOptions: LoadConfigOptions = { fallbackToDevelopmentEnv: true },
+): DaemonConfiguration {
+  return {
+    get() {
+      return loadConfig(configPath, loadOptions);
+    },
+    update(changes) {
+      const current = loadConfig(configPath, loadOptions);
+      const merged: DaemonConfig = {
+        provider: changes.provider || current?.provider || 'deepseek',
+        model: changes.model || current?.model || 'deepseek-v4-flash',
+        apiKey: changes.apiKey || current?.apiKey || '',
+        thinkingLevel: changes.thinkingLevel || current?.thinkingLevel || 'minimal',
+      };
+
+      if (!validateConfig(merged)) {
+        throw new Error(`缺少必填配置项：${REQUIRED_FIELDS.join(', ')}`);
+      }
+
+      saveConfig(configPath, merged);
+      return merged;
+    },
+  };
+}
+
 /**
  * 校验配置对象是否包含所有必填字段。
  */
@@ -133,35 +165,22 @@ function validateConfig(body: unknown): body is DaemonConfig {
  */
 export function createConfigRoutes(
   app: Hono,
-  configPath: string,
-  loadConfigOptions: LoadConfigOptions = { fallbackToDevelopmentEnv: true },
+  configuration: DaemonConfiguration,
 ): void {
   app.get('/config', (c) => {
-    const config = loadConfig(configPath);
-    return c.json(config);
+    return c.json(configuration.get());
   });
 
   app.post('/config', async (c) => {
     const body = await c.req.json();
 
-    // 与当前有效配置合并：请求中缺失的字段用已有值补全，
-    // 这样前端只需发送要修改的字段（如 thinkingLevel）
-    const current = loadConfig(configPath, loadConfigOptions);
-    const merged: DaemonConfig = {
-      provider: body.provider || current?.provider || 'deepseek',
-      model: body.model || current?.model || 'deepseek-v4-flash',
-      apiKey: body.apiKey || current?.apiKey || '',
-      thinkingLevel: body.thinkingLevel || current?.thinkingLevel || 'minimal',
-    };
-
-    if (!validateConfig(merged)) {
+    try {
+      return c.json(configuration.update(body));
+    } catch (error) {
       return c.json(
-        { error: `缺少必填配置项：${REQUIRED_FIELDS.join(', ')}` },
+        { error: error instanceof Error ? error.message : '配置无效' },
         400,
       );
     }
-
-    saveConfig(configPath, merged);
-    return c.json(merged);
   });
 }

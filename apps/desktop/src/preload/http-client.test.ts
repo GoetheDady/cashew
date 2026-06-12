@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import type { ChatEvent, DBCommand } from '@cashew/shared';
-import { formatDaemonError, parseSSEStream, readSSEStream, mapDBCommandToFetch, mapResponseToDBEvent } from './http-client.js';
+import { formatDaemonError, parseSSEStream, readSSEStream, mapConversationCommandToFetch, mapResponseToConversationEvent } from './http-client.js';
 
 /**
  * Issue 06: Desktop preload HTTP 适配层
@@ -144,30 +143,30 @@ describe('readSSEStream', () => {
 
 // ---------- DB Command 映射测试 ----------
 
-describe('mapDBCommandToFetch', () => {
+describe('mapConversationCommandToFetch', () => {
   const PORT = 11434;
 
   it('maps get_all_sessions to GET /sessions', () => {
-    const result = mapDBCommandToFetch(PORT, { type: 'get_all_sessions' });
+    const result = mapConversationCommandToFetch(PORT, { type: 'get_all_sessions' });
     expect(result.url).toBe(`http://localhost:${PORT}/sessions`);
     expect(result.method).toBe('GET');
   });
 
   it('maps create_session to POST /sessions', () => {
-    const result = mapDBCommandToFetch(PORT, { type: 'create_session', title: 'Test' });
+    const result = mapConversationCommandToFetch(PORT, { type: 'create_session', title: 'Test' });
     expect(result.url).toBe(`http://localhost:${PORT}/sessions`);
     expect(result.method).toBe('POST');
     expect(result.body).toBe(JSON.stringify({ title: 'Test' }));
   });
 
   it('maps delete_session to DELETE /sessions/:id', () => {
-    const result = mapDBCommandToFetch(PORT, { type: 'delete_session', sessionId: 'abc' });
+    const result = mapConversationCommandToFetch(PORT, { type: 'delete_session', sessionId: 'abc' });
     expect(result.url).toBe(`http://localhost:${PORT}/sessions/abc`);
     expect(result.method).toBe('DELETE');
   });
 
   it('maps update_session_title to PATCH /sessions/:id', () => {
-    const result = mapDBCommandToFetch(PORT, {
+    const result = mapConversationCommandToFetch(PORT, {
       type: 'update_session_title',
       sessionId: 'abc',
       title: 'New',
@@ -178,7 +177,7 @@ describe('mapDBCommandToFetch', () => {
   });
 
   it('maps get_messages to GET /sessions/:id/messages', () => {
-    const result = mapDBCommandToFetch(PORT, {
+    const result = mapConversationCommandToFetch(PORT, {
       type: 'get_messages',
       sessionId: 'abc',
     });
@@ -187,38 +186,53 @@ describe('mapDBCommandToFetch', () => {
   });
 });
 
-// ---------- mapResponseToDBEvent 测试 ----------
+// ---------- mapResponseToConversationEvent 测试 ----------
 
-describe('mapResponseToDBEvent', () => {
+describe('mapResponseToConversationEvent', () => {
   it('includes sessionId in messages_loaded event', () => {
     const messages = [
-      { id: 'msg-1', session_id: 'abc', role: 'user' as const, content: 'Hi', created_at: 1700000000000 },
+      { id: 'msg-1', conversation_id: 'abc', role: 'user' as const, content: 'Hi', created_at: 1700000000000 },
     ];
 
-    const event = mapResponseToDBEvent({ type: 'get_messages', sessionId: 'abc' }, messages);
+    const event = mapResponseToConversationEvent({ type: 'get_messages', sessionId: 'abc' }, messages);
 
     expect(event).toEqual({
       type: 'messages_loaded',
       sessionId: 'abc',
-      messages,
+      messages: [{
+        id: 'msg-1',
+        session_id: 'abc',
+        role: 'user',
+        content: 'Hi',
+        created_at: 1700000000000,
+      }],
     });
   });
 
   it('returns sessions_loaded for get_all_sessions', () => {
     const sessions = [{ id: 's1', title: 'Test', created_at: 1, updated_at: 2 }];
-    const event = mapResponseToDBEvent({ type: 'get_all_sessions' }, sessions);
+    const event = mapResponseToConversationEvent({ type: 'get_all_sessions' }, sessions);
     expect(event).toEqual({ type: 'sessions_loaded', sessions });
   });
 
   it('returns session_created for create_session', () => {
     const session = { id: 's1', title: 'Test', created_at: 1, updated_at: 2 };
-    const event = mapResponseToDBEvent({ type: 'create_session' }, session);
+    const event = mapResponseToConversationEvent({ type: 'create_session' }, session);
     expect(event).toEqual({ type: 'session_created', session });
   });
 
   it('returns session_deleted for delete_session', () => {
-    const event = mapResponseToDBEvent({ type: 'delete_session', sessionId: 'abc' }, { ok: true });
+    const event = mapResponseToConversationEvent({ type: 'delete_session', sessionId: 'abc' }, { ok: true });
     expect(event).toEqual({ type: 'session_deleted', sessionId: 'abc' });
+  });
+});
+
+describe('Daemon response validation', () => {
+  it('rejects an invalid Conversation response before it reaches Desktop state', () => {
+    expect(() => mapResponseToConversationEvent(
+      { type: 'create_session' },
+      { id: 'conversation-1', title: 'Broken' },
+    )).toThrow('Daemon 返回了无效的 Conversation');
   });
 });
 

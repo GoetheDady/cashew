@@ -11,10 +11,11 @@
     "build": "electron-vite build",
     "build:daemon": "cd ../daemon && pnpm build",
     "preview": "electron-vite preview",
-    "prepackage": "pnpm build && pnpm build:daemon",
+    "stage:node": "node scripts/stage-node-runtime.mjs",
+    "prepackage": "pnpm stage:node && pnpm build && pnpm build:daemon",
     "package": "pnpm prepackage && electron-builder --dir",
     "make": "pnpm prepackage && electron-builder",
-    "publish": "pnpm build && electron-builder --publish always",
+    "publish": "pnpm prepackage && electron-builder --publish always",
     "lint": "eslint --ext .ts,.tsx .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
@@ -38,6 +39,10 @@
       {
         "from": "../daemon/package.json",
         "to": "daemon/package.json"
+      },
+      {
+        "from": "build/node",
+        "to": "node"
       }
     ],
     "files": [

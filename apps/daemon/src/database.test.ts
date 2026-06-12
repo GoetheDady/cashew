@@ -4,8 +4,7 @@ import { Hono } from 'hono';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { createSessionRoutes } from './database.js';
-import { openDatabase } from './database.js';
+import { createSessionRoutes, openConversationPersistence } from './database.js';
 
 /**
  * Issue 03: SQLite Conversation CRUD
@@ -15,11 +14,43 @@ import { openDatabase } from './database.js';
  */
 
 function createTestApp(dbPath: string): Hono {
-  const db = openDatabase(dbPath);
+  const db = openConversationPersistence(dbPath);
   const app = new Hono();
   createSessionRoutes(app, db);
   return app;
 }
+
+describe('Conversation persistence', () => {
+  it('persists and deletes a completed Conversation through its public interface', () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'cashew-conversation-persistence-test-'));
+    const persistence = openConversationPersistence(join(tmpDir, 'test.db'));
+
+    try {
+      const conversation = persistence.createConversation('新对话');
+      persistence.saveCompletedTurn(conversation.id, {
+        id: 'user-1',
+        content: '你好',
+        createdAt: '2026-06-13T00:00:00.000Z',
+      }, {
+        id: 'assistant-1',
+        content: '你好，有什么可以帮你？',
+        createdAt: '2026-06-13T00:00:01.000Z',
+      });
+
+      expect(persistence.getMessages(conversation.id).map((message) => message.content)).toEqual([
+        '你好',
+        '你好，有什么可以帮你？',
+      ]);
+
+      persistence.deleteConversation(conversation.id);
+      expect(persistence.getConversation(conversation.id)).toBeUndefined();
+      expect(persistence.getMessages(conversation.id)).toEqual([]);
+    } finally {
+      persistence.close();
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
 
 describe('session CRUD', () => {
   let server: ReturnType<typeof serve>;

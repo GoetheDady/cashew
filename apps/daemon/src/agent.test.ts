@@ -1,17 +1,21 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
-import Database from 'better-sqlite3';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { openDatabase, createSessionRoutes } from './database.js';
+import {
+  openConversationPersistence,
+  createSessionRoutes,
+  type ConversationPersistence,
+} from './database.js';
 import {
   createTurnRoutes,
   createTitleStreamOptions,
   type CreateAgentFn,
   type DaemonConfig,
   DefaultSessionManager,
+  TurnWorkflow,
 } from './agent.js';
 import type { AgentLike } from './agent.js';
 import type { AgentEvent } from '@earendil-works/pi-agent-core';
@@ -113,7 +117,7 @@ describe('turn endpoints', () => {
   let server: ReturnType<typeof serve>;
   let port: number;
   let tmpDir: string;
-  let db: Database.Database;
+  let db: ConversationPersistence;
   let fakeAgent: ReturnType<typeof createFakeAgent>;
 
   const createAgent: CreateAgentFn = () => fakeAgent;
@@ -121,7 +125,7 @@ describe('turn endpoints', () => {
   beforeAll(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), 'cashew-agent-test-'));
     const dbPath = join(tmpDir, 'test.db');
-    db = openDatabase(dbPath);
+    db = openConversationPersistence(dbPath);
     fakeAgent = createFakeAgent();
 
     const app = new Hono();
@@ -252,9 +256,7 @@ describe('turn endpoints', () => {
         title: '前端路由重构',
       });
 
-      const updatedSession = db.prepare('SELECT title FROM conversations WHERE id = ?')
-        .get(title.sessionId) as { title: string };
-      expect(updatedSession.title).toBe('前端路由重构');
+      expect(db.getConversation(title.sessionId)?.title).toBe('前端路由重构');
     } finally {
       localServer.close();
     }
@@ -295,15 +297,9 @@ describe('turn endpoints', () => {
 
     await response.text(); // consume SSE stream
 
-    // 验证 assistant 消息已持久化
-    const assistantMessages = db.prepare('SELECT role, content FROM messages WHERE role = ? ORDER BY created_at DESC').all('assistant') as Array<{ role: string; content: string }>;
-    expect(assistantMessages.length).toBeGreaterThanOrEqual(1);
-    expect(assistantMessages[0].content).toBe('World');
-
-    // 验证 user 消息也已持久化
-    const userMessages = db.prepare('SELECT role, content FROM messages WHERE role = ? ORDER BY created_at DESC').all('user') as Array<{ role: string; content: string }>;
-    expect(userMessages.length).toBeGreaterThanOrEqual(1);
-    expect(userMessages[0].content).toBe('Hey');
+    const messages = db.getMessages('default');
+    expect(messages.some((message) => message.role === 'assistant' && message.content === 'World')).toBe(true);
+    expect(messages.some((message) => message.role === 'user' && message.content === 'Hey')).toBe(true);
   });
 
   it('POST /turns persists messages under the provided sessionId', async () => {
@@ -372,16 +368,30 @@ describe('turn endpoints', () => {
     });
   });
 
-  it('syncConfig updates agent thinkingLevel on subsequent turns', () => {
-    // getOrCreate 首次创建 agent 时 thinkingLevel = 'minimal'（来自 mockConfig）
+  it('syncConfig updates agent thinkingLevel on subsequent turns', async () => {
     const sessionManager = new DefaultSessionManager(createAgent);
-    const turn1 = sessionManager.getOrCreate(mockConfig, 'test-session');
+    const turn1 = sessionManager.startTurn(mockConfig, 'test-session', 'first', () => {});
+    await turn1.completed;
     expect(fakeAgent.state.thinkingLevel).toBe('minimal');
 
-    // 修改 config 中的 thinkingLevel，再次 getOrCreate 应同步到 agent
     const updatedConfig = { ...mockConfig, thinkingLevel: 'xhigh' };
-    sessionManager.getOrCreate(updatedConfig, 'test-session');
+    const turn2 = sessionManager.startTurn(updatedConfig, 'test-session', 'second', () => {});
+    await turn2.completed;
     expect(fakeAgent.state.thinkingLevel).toBe('xhigh');
+  });
+
+  it('cancels the active turn by the real turn ID returned to the caller', () => {
+    fakeAgent.prompt = vi.fn(() => new Promise<void>(() => {})) as unknown as AgentLike['prompt'];
+    const workflow = new TurnWorkflow(
+      db,
+      new DefaultSessionManager(createAgent),
+      () => mockConfig,
+    );
+
+    const turn = workflow.start('keep running', 'cancel-by-id', () => {});
+
+    expect(workflow.cancel(turn.turnId)).toBe(true);
+    expect(fakeAgent.abort).toHaveBeenCalledTimes(1);
   });
 
   it('POST /turns/:id/cancel returns 200', async () => {

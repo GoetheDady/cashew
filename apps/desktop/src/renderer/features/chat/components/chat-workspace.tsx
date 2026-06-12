@@ -1,4 +1,4 @@
-import type { DBSession } from '@cashew/shared';
+import type { Conversation } from '@cashew/shared';
 import { formatDay, type DisplayMessage } from '../lib/chat-formatters';
 import type { ThinkingLevel } from '../lib/model-options';
 import { MessageComposer } from './message-composer';
@@ -6,7 +6,7 @@ import { MessageList } from './message-list';
 import type { FormEvent } from 'react';
 
 type ChatWorkspaceProps = {
-  activeSession: DBSession | undefined;
+  activeSession: Conversation | undefined;
   activeSessionId: string | null;
   messages: DisplayMessage[];
   prompt: string;

@@ -7,7 +7,7 @@ export default defineConfig({
     plugins: [
       // 外部化 node_modules 依赖，但打包 workspace 内部包
       externalizeDepsPlugin({
-        exclude: ['@cashew/agent', '@cashew/shared'],
+        exclude: ['@cashew/shared'],
       }),
     ],
   },

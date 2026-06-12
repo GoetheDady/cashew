@@ -1,8 +1,8 @@
 import { Hono } from 'hono';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { createConfigRoutes } from './config.js';
-import { openDatabase, createSessionRoutes } from './database.js';
+import { createConfigRoutes, createDaemonConfiguration } from './config.js';
+import { openConversationPersistence, createSessionRoutes } from './database.js';
 import { createTurnRoutes } from './agent.js';
 
 /** 默认数据目录：~/.cashew */
@@ -45,11 +45,14 @@ export function createApp(options: CreateAppOptions = {}): Hono {
     return c.json({ status: 'ok' });
   });
 
-  createConfigRoutes(app, configPath);
+  const configuration = createDaemonConfiguration(configPath, {
+    fallbackToDevelopmentEnv: true,
+  });
+  createConfigRoutes(app, configuration);
 
-  const db = openDatabase(dbPath);
-  createSessionRoutes(app, db);
-  createTurnRoutes(app, db);
+  const persistence = openConversationPersistence(dbPath);
+  createSessionRoutes(app, persistence);
+  createTurnRoutes(app, persistence, undefined, () => configuration.get());
 
   return app;
 }

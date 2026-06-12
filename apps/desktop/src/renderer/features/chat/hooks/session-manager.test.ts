@@ -1,16 +1,33 @@
 import { describe, expect, it } from 'vitest';
-import type { DBMessage } from '@cashew/shared';
+import type { ConversationMessage } from '@cashew/shared';
 import { sessionManagerReducer } from './session-manager';
 
 const initialState = {
   sessions: [],
   activeSessionId: null,
-  messages: [] as DBMessage[],
+  messages: [] as ConversationMessage[],
   isLoading: true,
   error: null as string | null,
 };
 
 describe('sessionManagerReducer', () => {
+  it('moves a touched Conversation to the front of Conversation History', () => {
+    const next = sessionManagerReducer({
+      ...initialState,
+      sessions: [
+        { id: 'newer', title: 'Newer', created_at: 2, updated_at: 2 },
+        { id: 'active', title: 'Active', created_at: 1, updated_at: 1 },
+      ],
+    }, {
+      type: 'session_touched',
+      sessionId: 'active',
+      updatedAt: 3,
+    });
+
+    expect(next.sessions.map((conversation) => conversation.id)).toEqual(['active', 'newer']);
+    expect(next.sessions[0].updated_at).toBe(3);
+  });
+
   describe('session_activated', () => {
     it('clears messages when switching to a new session', () => {
       // 模拟用户从 session-1 切换到 session-2
@@ -86,7 +103,7 @@ describe('sessionManagerReducer', () => {
       const state = {
         ...initialState,
         activeSessionId: 'session-2',
-        messages: [] as DBMessage[],
+        messages: [] as ConversationMessage[],
         isLoading: true,
       };
 

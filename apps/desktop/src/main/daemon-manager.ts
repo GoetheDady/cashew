@@ -23,6 +23,23 @@ interface DaemonManagerOptions {
   spawnDaemon?: () => ChildProcess;
 }
 
+export function resolvePackagedDaemonCommand(
+  resourcesPath: string,
+  pathExists: (path: string) => boolean = existsSync,
+): { command: string; args: string[]; cwd: string } {
+  const executable = process.platform === 'win32' ? 'node.exe' : 'node';
+  const bundledNode = path.join(resourcesPath, 'node', 'bin', executable);
+  if (!pathExists(bundledNode)) {
+    throw new Error('Cashew 安装包缺少内置 Node runtime。');
+  }
+
+  return {
+    command: bundledNode,
+    args: ['index.js'],
+    cwd: path.join(resourcesPath, 'daemon'),
+  };
+}
+
 /**
  * Daemon 进程管理器。
  *
@@ -104,11 +121,7 @@ export class DaemonManager {
   /** 获取 daemon 运行命令 */
   private getDaemonCommand(): { command: string; args: string[]; cwd?: string } {
     if (app.isPackaged) {
-      // 生产环境：优先使用内嵌的 Node 二进制，fallback 到系统 Node
-      const bundledNode = path.join(process.resourcesPath, 'node', 'bin', 'node');
-      const nodeBin = existsSync(bundledNode) ? bundledNode : 'node';
-      const daemonDir = path.join(process.resourcesPath, 'daemon');
-      return { command: nodeBin, args: ['index.js'], cwd: daemonDir };
+      return resolvePackagedDaemonCommand(process.resourcesPath);
     }
     // 开发环境：使用系统 Node + tsx
     return { command: 'node', args: ['--import', 'tsx', this.getDaemonEntryPath()] };
@@ -227,8 +240,14 @@ export class DaemonManager {
   /** 重新连接：清理旧状态与子进程后重新拉起 daemon */
   async reconnect(): Promise<void> {
     this.stopPolling();
-    this.stopSpawnedDaemon();
-    this.removePortFile();
+
+    // 已连接的 Daemon 可能独立于当前 Desktop 运行。只有当前 Desktop
+    // 确实持有子进程时，Reconnect 才有权清理并重新拉起它。
+    if (this.daemonProcess) {
+      this.stopSpawnedDaemon();
+      this.removePortFile();
+    }
+
     await this.start();
   }
 

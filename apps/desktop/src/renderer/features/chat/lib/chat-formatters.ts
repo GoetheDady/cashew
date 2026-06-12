@@ -1,4 +1,4 @@
-import type { DBMessage } from '@cashew/shared';
+import type { ConversationMessage } from '@cashew/shared';
 
 export type DisplayMessage = {
   id: string;
@@ -19,7 +19,7 @@ export function formatTime(value?: string | number) {
   }).format(date);
 }
 
-export function formatDay(value?: number) {
+export function formatDay(value?: string | number) {
   if (!value) return '今天';
 
   const date = new Date(value);
@@ -38,6 +38,6 @@ export function formatDay(value?: number) {
 
 export function getMessageTimestamp(message: DisplayMessage) {
   return 'created_at' in message
-    ? (message as DisplayMessage & Pick<DBMessage, 'created_at'>).created_at
+    ? (message as DisplayMessage & Pick<ConversationMessage, 'created_at'>).created_at
     : message.createdAt;
 }

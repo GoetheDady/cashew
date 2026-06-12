@@ -87,6 +87,39 @@ describe('chatSessionReducer', () => {
     expect(next.thinkingContent).toBe('');
   });
 
+  it('ignores stale streamed events after switching the active Conversation', () => {
+    const switched = chatSessionReducer({
+      ...initialChatSessionState,
+      sessionId: 'old-conversation',
+      currentTurnId: 'old-turn',
+      isSending: true,
+    }, {
+      type: 'session_changed',
+      sessionId: 'new-conversation',
+    });
+
+    const staleStart = chatSessionReducer(switched, {
+      type: 'event',
+      event: {
+        type: 'turn_started',
+        sessionId: 'old-conversation',
+        turnId: 'old-turn',
+        message: {
+          id: 'old-message',
+          role: 'user',
+          content: 'stale',
+          createdAt: '2026-01-01T00:00:00.000Z',
+        },
+      },
+    });
+    const staleDelta = chatSessionReducer(staleStart, {
+      type: 'event',
+      event: { type: 'thinking_delta', turnId: 'old-turn', delta: 'stale thinking' },
+    });
+
+    expect(staleDelta).toEqual(switched);
+  });
+
   it('stores title events from the chat stream', () => {
     const next = chatSessionReducer(initialChatSessionState, {
       type: 'event',

@@ -1,24 +1,25 @@
 import { useEffect, useReducer, useCallback } from 'react';
-import type { DBSession, DBMessage, DBEvent } from '@cashew/shared';
+import type { Conversation, ConversationMessage, ConversationEvent } from '@cashew/shared';
 
 /**
  * 会话管理状态
  */
 interface SessionManagerState {
-  sessions: DBSession[]; // 所有会话列表
+  sessions: Conversation[]; // 所有会话列表
   activeSessionId: string | null; // 当前激活的会话 ID
-  messages: DBMessage[]; // 当前会话的消息列表
+  messages: ConversationMessage[]; // 当前会话的消息列表
   isLoading: boolean; // 是否正在加载
   error: string | null; // 错误信息
 }
 
 type SessionManagerAction =
-  | { type: 'sessions_loaded'; sessions: DBSession[] }
-  | { type: 'session_created'; session: DBSession }
+  | { type: 'sessions_loaded'; sessions: Conversation[] }
+  | { type: 'session_created'; session: Conversation }
   | { type: 'session_deleted'; sessionId: string }
   | { type: 'session_activated'; sessionId: string }
-  | { type: 'messages_loaded'; sessionId: string; messages: DBMessage[] }
-  | { type: 'session_title_updated'; sessionId: string; title: string }
+  | { type: 'messages_loaded'; sessionId: string; messages: ConversationMessage[] }
+  | { type: 'session_title_updated'; sessionId: string; title: string; updatedAt: number }
+  | { type: 'session_touched'; sessionId: string; updatedAt: number }
   | { type: 'set_loading'; isLoading: boolean }
   | { type: 'set_error'; error: string | null };
 
@@ -63,8 +64,18 @@ export function sessionManagerReducer(
       return {
         ...state,
         sessions: state.sessions.map((s) =>
-          s.id === action.sessionId ? { ...s, title: action.title } : s
-        ),
+          s.id === action.sessionId
+            ? { ...s, title: action.title, updated_at: action.updatedAt }
+            : s
+        ).sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()),
+      };
+
+    case 'session_touched':
+      return {
+        ...state,
+        sessions: state.sessions.map((s) =>
+          s.id === action.sessionId ? { ...s, updated_at: action.updatedAt } : s
+        ).sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()),
       };
 
     case 'set_loading':
@@ -106,7 +117,7 @@ export function useSessionManager({
     }
 
     dispatch({ type: 'set_loading', isLoading: true });
-    await window.cashew.sendDBCommand({ type: 'get_all_sessions' });
+    await window.cashew.sendConversationCommand({ type: 'get_all_sessions' });
   }, [enabled]);
 
   // 创建新会话
@@ -116,7 +127,7 @@ export function useSessionManager({
       return null;
     }
 
-    const event = await window.cashew.sendDBCommand({ type: 'create_session', title });
+    const event = await window.cashew.sendConversationCommand({ type: 'create_session', title });
     return event?.type === 'session_created' ? event.session : null;
   }, [enabled]);
 
@@ -128,7 +139,7 @@ export function useSessionManager({
     }
 
     dispatch({ type: 'session_activated', sessionId });
-    await window.cashew.sendDBCommand({ type: 'get_messages', sessionId });
+    await window.cashew.sendConversationCommand({ type: 'get_messages', sessionId });
   }, [enabled]);
 
   // 删除会话
@@ -138,7 +149,7 @@ export function useSessionManager({
       return;
     }
 
-    await window.cashew.sendDBCommand({ type: 'delete_session', sessionId });
+    await window.cashew.sendConversationCommand({ type: 'delete_session', sessionId });
   }, [enabled]);
 
   // 更新会话标题
@@ -148,16 +159,20 @@ export function useSessionManager({
       return;
     }
 
-    await window.cashew.sendDBCommand({ type: 'update_session_title', sessionId, title });
+    await window.cashew.sendConversationCommand({ type: 'update_session_title', sessionId, title });
   }, [enabled]);
 
   const applySessionTitle = useCallback((sessionId: string, title: string) => {
-    dispatch({ type: 'session_title_updated', sessionId, title });
+    dispatch({ type: 'session_title_updated', sessionId, title, updatedAt: Date.now() });
+  }, []);
+
+  const touchSession = useCallback((sessionId: string) => {
+    dispatch({ type: 'session_touched', sessionId, updatedAt: Date.now() });
   }, []);
 
   // 监听数据库事件
   useEffect(() => {
-    const unsubscribe = window.cashew.subscribeDBEvents((event: DBEvent) => {
+    const unsubscribe = window.cashew.subscribeConversationEvents((event: ConversationEvent) => {
       switch (event.type) {
         case 'sessions_loaded':
           dispatch({ type: 'sessions_loaded', sessions: event.sessions });
@@ -182,6 +197,7 @@ export function useSessionManager({
             type: 'session_title_updated',
             sessionId: event.sessionId,
             title: event.title,
+            updatedAt: Date.now(),
           });
           break;
 
@@ -216,5 +232,6 @@ export function useSessionManager({
     deleteSession,
     updateSessionTitle,
     applySessionTitle,
+    touchSession,
   };
 }
