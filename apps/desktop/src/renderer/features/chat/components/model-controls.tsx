@@ -17,6 +17,7 @@ import {
 type ModelControlsProps = {
   selectedModel: string;
   thinkingLevel: ThinkingLevel;
+  disabled: boolean;
   onModelChange: (modelId: string) => void;
   onThinkingChange: (level: ThinkingLevel) => void;
 };
@@ -24,6 +25,7 @@ type ModelControlsProps = {
 export function ModelControls({
   selectedModel,
   thinkingLevel,
+  disabled,
   onModelChange,
   onThinkingChange,
 }: ModelControlsProps) {
@@ -32,7 +34,7 @@ export function ModelControls({
 
   return (
     <div className="flex items-center gap-3">
-      <Select value={selectedModel} onValueChange={onModelChange}>
+      <Select disabled={disabled} value={selectedModel} onValueChange={onModelChange}>
         <SelectTrigger className="h-[2.375rem] w-auto gap-1.5 border-border bg-card/90 px-3 text-xs font-semibold">
           <SelectValue />
         </SelectTrigger>
@@ -55,6 +57,7 @@ export function ModelControls({
         />
         <input
           type="range"
+          disabled={disabled}
           min={0}
           max={effectiveLevels.length - 1}
           value={selectedLevelIndex >= 0 ? selectedLevelIndex : 0}

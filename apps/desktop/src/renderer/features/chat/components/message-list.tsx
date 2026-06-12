@@ -11,9 +11,9 @@ import {
 } from '../lib/chat-formatters';
 
 const promptSuggestions = [
-  'Help me think through an idea',
-  'Make a clear action plan',
-  'Summarize a complex topic',
+  '帮我梳理一个想法',
+  '制定一份清晰的行动计划',
+  '总结一个复杂的话题',
 ];
 
 type MessageListProps = {
@@ -45,7 +45,7 @@ export function MessageList({
             className="h-8 w-8 animate-spin rounded-full border-[3px] border-muted border-t-primary"
             aria-hidden="true"
           />
-          <span className="text-sm font-semibold">Loading conversation...</span>
+          <span className="text-sm font-semibold">正在加载对话...</span>
         </div>
       </div>
     );
@@ -63,12 +63,12 @@ export function MessageList({
             />
           </div>
           <h3 className="m-0 text-[1.875rem] font-bold text-foreground">
-            What can I help with?
+            有什么可以帮你？
           </h3>
           <p className="mx-auto mb-0 mt-2.5 max-w-[28.75rem] text-sm leading-relaxed text-muted-foreground">
-            Start with a question, a plan, or a task you want to work through.
+            从一个问题、一份计划，或一项想要完成的任务开始。
           </p>
-          <div className="mt-7 grid w-full grid-cols-3 gap-2.5" aria-label="Prompt suggestions">
+          <div className="mt-7 grid w-full grid-cols-3 gap-2.5" aria-label="提示建议">
             {promptSuggestions.map((suggestion) => (
               <Button
                 className="h-auto min-h-[4.375rem] justify-start whitespace-normal bg-card/80 p-3.5 text-left hover:border-[#d8cabb] hover:bg-card hover:shadow-[0_12px_24px_rgba(94,58,27,0.07)]"
@@ -119,7 +119,7 @@ export function MessageList({
                   isUser && 'justify-end',
                 )}
               >
-                <span>{isUser ? 'You' : 'Cashew'}</span>
+                <span>{isUser ? '你' : 'Cashew'}</span>
                 {timestamp ? <time>{timestamp}</time> : null}
               </div>
               {!isUser && thinkingContent && isLatestAssistantMessage ? (
@@ -146,7 +146,7 @@ export function MessageList({
                 </div>
               ) : null}
               <p className="m-0 whitespace-pre-wrap text-[15px] leading-[1.72] text-[#20293a]">
-                {message.content || (isSending && !thinkingContent ? 'Thinking...' : '')}
+                {message.content || (isSending && !thinkingContent ? '思考中...' : '')}
               </p>
             </div>
           </article>

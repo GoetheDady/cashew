@@ -1,8 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, readFileSync, unlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
-import path from 'node:path';
+import path, { join } from 'node:path';
 import { app } from 'electron';
 import type { DaemonStatus } from '@cashew/shared';
 
@@ -137,7 +136,7 @@ export class DaemonManager {
       this.daemonProcess = null;
       // daemon 意外退出时通知
       if (this.currentStatus.state !== 'disconnected') {
-        this.setStatus({ state: 'error', message: `Daemon exited with code ${code}` });
+        this.setStatus({ state: 'error', message: `本地服务已退出，退出代码：${code}` });
       }
     });
   }
@@ -166,7 +165,7 @@ export class DaemonManager {
         timeoutReported = true;
         this.setStatus({
           state: 'error',
-          message: 'Failed to connect to Cashew service. Make sure the daemon is running.',
+          message: '无法连接到 Cashew 本地服务，请确认服务是否正在运行。',
         });
       }
 
@@ -174,7 +173,7 @@ export class DaemonManager {
         this.stopPolling();
         this.setStatus({
           state: 'error',
-          message: 'Failed to connect to Cashew service. Make sure the daemon is running.',
+          message: '无法连接到 Cashew 本地服务，请确认服务是否正在运行。',
         });
       }
     }, this.pollIntervalMs);
@@ -187,8 +186,23 @@ export class DaemonManager {
     }
   }
 
+  private removePortFile(): void {
+    try {
+      unlinkSync(this.portFilePath);
+    } catch { /* ignore */ }
+  }
+
+  private stopSpawnedDaemon(): void {
+    if (!this.daemonProcess) return;
+
+    this.daemonProcess.removeAllListeners('exit');
+    this.daemonProcess.kill();
+    this.daemonProcess = null;
+  }
+
   /** 启动：检测 daemon，必要时拉起，然后轮询直到连上 */
   async start(): Promise<void> {
+    this.stopPolling();
     this.setStatus({ state: 'connecting' });
 
     // 先检查是否已有运行的 daemon
@@ -202,14 +216,20 @@ export class DaemonManager {
         return;
       }
       // 端口文件存在但连不上 → 清理旧的端口文件
-      try {
-        unlinkSync(this.portFilePath);
-      } catch { /* ignore */ }
+      this.removePortFile();
     }
 
     // 拉起 daemon
     this.spawnDaemon();
     this.startPolling(this.connectTimeoutMs);
+  }
+
+  /** 重新连接：清理旧状态与子进程后重新拉起 daemon */
+  async reconnect(): Promise<void> {
+    this.stopPolling();
+    this.stopSpawnedDaemon();
+    this.removePortFile();
+    await this.start();
   }
 
   /** 停止 daemon（发送 shutdown 请求） */
@@ -223,11 +243,7 @@ export class DaemonManager {
     }
 
     this.stopPolling();
-
-    if (this.daemonProcess) {
-      this.daemonProcess.kill();
-      this.daemonProcess = null;
-    }
+    this.stopSpawnedDaemon();
   }
 
   /** 注册状态变更监听器 */

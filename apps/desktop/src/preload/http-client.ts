@@ -12,11 +12,11 @@ function getErrorMessage(data: unknown): string | null {
 export function formatDaemonError(status: number, data: unknown): string {
   const message = getErrorMessage(data);
 
-  if (message === 'Configuration not found.') {
-    return 'Cashew is not configured yet. Add your model provider, model, and API key before sending a message.';
+  if (message === 'Configuration not found.' || message === '未找到配置信息。') {
+    return 'Cashew 尚未完成配置，请先添加模型服务商、模型和 API 密钥。';
   }
 
-  return message || `Request failed with status ${status}`;
+  return message || `请求失败，状态码：${status}`;
 }
 
 /**

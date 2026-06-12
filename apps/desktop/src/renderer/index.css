@@ -52,5 +52,35 @@
 body {
   margin: 0;
   overflow: hidden;
-  background: var(--background);
+  background: transparent;
+}
+
+html,
+body,
+#root,
+.app-shell {
+  width: 100%;
+  height: 100%;
+}
+
+.platform-darwin .chat-page-shell {
+  background: transparent;
+}
+
+.platform-darwin .window-frame-logo-row,
+.platform-darwin .window-frame-toolbar {
+  -webkit-app-region: drag;
+}
+
+.platform-darwin .window-frame-logo-row {
+  padding-left: 64px;
+}
+
+.platform-darwin button,
+.platform-darwin a,
+.platform-darwin input,
+.platform-darwin textarea,
+.platform-darwin select,
+.platform-darwin [role='button'] {
+  -webkit-app-region: no-drag;
 }

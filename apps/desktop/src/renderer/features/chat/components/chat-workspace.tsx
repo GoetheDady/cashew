@@ -17,6 +17,7 @@ type ChatWorkspaceProps = {
   isThinking: boolean;
   thinkingContent: string;
   error: string | null;
+  isConnected: boolean;
   onPromptChange: (prompt: string) => void;
   onModelChange: (modelId: string) => void;
   onThinkingChange: (level: ThinkingLevel) => void;
@@ -36,6 +37,7 @@ export function ChatWorkspace({
   isThinking,
   thinkingContent,
   error,
+  isConnected,
   onPromptChange,
   onModelChange,
   onThinkingChange,
@@ -45,15 +47,15 @@ export function ChatWorkspace({
   return (
     <section
       className="flex min-h-0 min-w-0 flex-col bg-[radial-gradient(circle_at_50%_-20%,rgba(242,233,221,0.72),transparent_38%),linear-gradient(180deg,#fffdf9_0%,#fbf8f2_100%)]"
-      aria-label="Chat workspace"
+      aria-label="聊天区域"
     >
-      <header className="flex min-h-[4.375rem] items-center justify-between gap-5 border-b border-border/70 px-[1.875rem]">
+      <header className="window-frame-toolbar flex min-h-[4.375rem] items-center justify-between gap-5 border-b border-border/70 px-[1.875rem]">
         <div className="min-w-0 flex-1">
           <h2 className="m-0 truncate text-base font-bold text-foreground">
-            {activeSession?.title || 'Cashew Agent'}
+            {activeSession?.title || 'Cashew 助手'}
           </h2>
           <p className="mb-0 mt-0.5 text-xs text-muted-foreground">
-            {activeSession ? formatDay(activeSession.updated_at) : 'New conversation'}
+            {activeSession ? formatDay(activeSession.updated_at) : '新对话'}
           </p>
         </div>
       </header>
@@ -86,6 +88,7 @@ export function ChatWorkspace({
         selectedModel={selectedModel}
         thinkingLevel={thinkingLevel}
         isSending={isSending}
+        isConnected={isConnected}
         onPromptChange={onPromptChange}
         onModelChange={onModelChange}
         onThinkingChange={onThinkingChange}

@@ -73,7 +73,7 @@ function cleanGeneratedTitle(title: string): string {
 
 function fallbackTitleFromPrompt(prompt: string): string {
   const compact = prompt.trim().replace(/\s+/g, ' ');
-  if (!compact) return 'New Chat';
+  if (!compact) return '新对话';
 
   const containsCjk = /[\u3400-\u9fff]/.test(compact);
   if (containsCjk) {
@@ -239,7 +239,7 @@ class AgentSessionImpl {
         type: 'turn_failed',
         turnId,
         code: error instanceof TurnError ? error.code : 'agent_execution_failed',
-        message: error instanceof Error ? error.message : 'Unknown agent error.',
+        message: error instanceof Error ? error.message : '未知助手错误。',
       });
     } finally {
       if (this.activeTurn?.turnId === turnId) this.activeTurn = undefined;
@@ -375,7 +375,7 @@ export function createTurnRoutes(
   app.post('/turns', async (c) => {
     const body = await c.req.json().catch(() => ({}));
     const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : '';
-    if (!prompt) return c.json({ error: 'prompt is required' }, 400);
+    if (!prompt) return c.json({ error: '消息不能为空' }, 400);
 
     // 支持会话级 Agent 路由：前端传入 sessionId，daemon 按会话维护 Agent 实例
     const sessionId: string | undefined =
@@ -388,7 +388,7 @@ export function createTurnRoutes(
         turnId: randomUUID(),
         code: 'missing_api_key',
         message:
-          'Cashew is not configured yet. Add your model provider, model, and API key before sending a message.',
+          'Cashew 尚未完成配置，请先添加模型服务商、模型和 API 密钥。',
       });
     }
 
@@ -465,7 +465,7 @@ export function createTurnRoutes(
 
   app.post('/turns/:id/cancel', async (c) => {
     const config = cfg();
-    if (!config) return c.json({ error: 'Configuration not found.' }, 400);
+    if (!config) return c.json({ error: '未找到配置信息。' }, 400);
     // cancel 时尝试从 body 读取 sessionId 以定位正确的 Agent 实例
     const body = await c.req.json().catch(() => ({}));
     const sessionId: string | undefined =
@@ -505,7 +505,8 @@ function shouldGenerateTitleForSession(db: Database.Database, sessionId: string)
   const messageCount = db.prepare('SELECT COUNT(*) as count FROM messages WHERE conversation_id = ?')
     .get(sessionId) as { count: number };
 
-  return messageCount.count === 0 && (!session.title.trim() || session.title === 'New Chat');
+  return messageCount.count === 0 &&
+    (!session.title.trim() || session.title === 'New Chat' || session.title === '新对话');
 }
 
 function persistTurnMessages(
@@ -520,7 +521,7 @@ function persistTurnMessages(
   if (!existing) {
     const now = new Date().toISOString();
     db.prepare('INSERT INTO conversations (id, title, created_at, updated_at) VALUES (?,?,?,?)')
-      .run(sessionId, 'New Chat', now, now);
+      .run(sessionId, '新对话', now, now);
   }
 
   // 持久化用户消息（turn_started 中 emit 的消息，此前漏掉未保存）

@@ -77,7 +77,7 @@ function getErrorMessage(error: unknown): string {
     return error.message;
   }
 
-  return "Unknown agent error.";
+  return "未知助手错误。";
 }
 
 export class AgentSession {
@@ -316,7 +316,7 @@ export class AgentRuntime {
     } catch (error) {
       emit({
         type: 'db_error',
-        error: error instanceof Error ? error.message : 'Unknown database error',
+        error: error instanceof Error ? error.message : '未知数据库错误',
       });
     }
   }

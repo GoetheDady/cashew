@@ -1,5 +1,5 @@
 import './index.css';
-import { getOrCreateRoot } from './react-root';
+import { getOrCreateRoot } from './app/react-root';
 import { App } from './app/app';
 
 const rootElement = document.getElementById('root');

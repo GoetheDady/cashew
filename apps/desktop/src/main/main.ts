@@ -16,6 +16,9 @@ ipcMain.handle('cashew:daemon-port', () => {
 ipcMain.handle('cashew:daemon-status', () => {
   return daemonManager.getStatus();
 });
+ipcMain.handle('cashew:daemon-reconnect', async () => {
+  await daemonManager.reconnect();
+});
 
 // IPC: 渲染器订阅 daemon 状态变更
 ipcMain.on('cashew:daemon-status-subscribe', (event, subscriptionId: string) => {
@@ -27,11 +30,25 @@ ipcMain.on('cashew:daemon-status-unsubscribe', (event, subscriptionId: string) =
 });
 
 const createWindow = () => {
+  const macWindowOptions =
+    process.platform === 'darwin'
+      ? {
+          titleBarStyle: 'hiddenInset' as const,
+          vibrancy: 'sidebar' as const,
+          visualEffectState: 'followWindow' as const,
+          transparent: true,
+          backgroundColor: '#00000000',
+        }
+      : {
+          titleBarStyle: 'default' as const,
+        };
+
   const mainWindow = new BrowserWindow({
     width: 1280,
     height: 820,
     minWidth: 1100,
     minHeight: 700,
+    ...macWindowOptions,
     webPreferences: {
       preload: path.join(__dirname, '../preload/preload.js'),
       contextIsolation: true,

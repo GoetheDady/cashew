@@ -1,5 +1,6 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { DaemonStatus } from '@cashew/shared';
+import { requestDaemonReconnect } from './daemon-reconnect';
 
 /**
  * Daemon 连接状态 hook。
@@ -15,6 +16,7 @@ export function useDaemonConnection(): {
   isLoading: boolean;
   hasError: boolean;
   errorMessage: string | null;
+  reconnect: () => Promise<void>;
 } {
   const [status, setStatus] = useState<DaemonStatus>({ state: 'disconnected' });
 
@@ -27,11 +29,16 @@ export function useDaemonConnection(): {
     return unsubscribe;
   }, []);
 
+  const reconnect = useCallback(async () => {
+    await requestDaemonReconnect(window.cashew, () => window.location.reload());
+  }, []);
+
   return {
     status,
     isConnected: status.state === 'connected',
     isLoading: status.state === 'connecting',
     hasError: status.state === 'error',
     errorMessage: status.state === 'error' ? status.message : null,
+    reconnect,
   };
 }

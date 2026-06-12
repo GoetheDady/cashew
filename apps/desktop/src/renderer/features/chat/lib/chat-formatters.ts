@@ -13,24 +13,24 @@ export function formatTime(value?: string | number) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '';
 
-  return new Intl.DateTimeFormat('en', {
+  return new Intl.DateTimeFormat('zh-CN', {
     hour: 'numeric',
     minute: '2-digit',
   }).format(date);
 }
 
 export function formatDay(value?: number) {
-  if (!value) return 'Today';
+  if (!value) return '今天';
 
   const date = new Date(value);
   const today = new Date();
   const yesterday = new Date();
   yesterday.setDate(today.getDate() - 1);
 
-  if (date.toDateString() === today.toDateString()) return 'Today';
-  if (date.toDateString() === yesterday.toDateString()) return 'Yesterday';
+  if (date.toDateString() === today.toDateString()) return '今天';
+  if (date.toDateString() === yesterday.toDateString()) return '昨天';
 
-  return new Intl.DateTimeFormat('en', {
+  return new Intl.DateTimeFormat('zh-CN', {
     month: 'short',
     day: 'numeric',
   }).format(date);

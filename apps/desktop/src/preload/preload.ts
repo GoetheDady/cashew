@@ -15,7 +15,7 @@ async function getDaemonPort(): Promise<number | null> {
 /** 保证 daemon 端口可用；不可用时抛出错误 */
 async function requireDaemonPort(): Promise<number> {
   const port = await getDaemonPort();
-  if (!port) throw new Error('Daemon is not running. Please start Cashew service first.');
+  if (!port) throw new Error('Cashew 本地服务未运行，请先启动服务。');
   return port;
 }
 
@@ -46,13 +46,16 @@ async function startTurnStream(
   }
 
   if (!response.body) {
-    throw new Error('No response body for SSE stream');
+    throw new Error('服务未返回响应内容。');
   }
 
   return response.body.getReader();
 }
 
 contextBridge.exposeInMainWorld('cashew', {
+  /** 当前桌面平台，用于适配原生窗口装饰。 */
+  platform: process.platform,
+
   /** 获取 daemon 端口号 */
   getDaemonPort: (): Promise<number | null> =>
     ipcRenderer.invoke('cashew:daemon-port'),
@@ -60,6 +63,10 @@ contextBridge.exposeInMainWorld('cashew', {
   /** 获取 daemon 连接状态 */
   getDaemonStatus: (): Promise<DaemonStatus> =>
     ipcRenderer.invoke('cashew:daemon-status'),
+
+  /** 清理旧连接并重新拉起 daemon */
+  reconnectDaemon: (): Promise<void> =>
+    ipcRenderer.invoke('cashew:daemon-reconnect'),
 
   /** 订阅 daemon 状态变更 */
   subscribeDaemonStatus: (
@@ -154,7 +161,7 @@ contextBridge.exposeInMainWorld('cashew', {
           typeof data === 'object' && data !== null && 'error' in data &&
           typeof (data as Record<string, unknown>).error === 'string'
             ? (data as Record<string, unknown>).error
-            : `Request failed with status ${response.status}`;
+            : `请求失败，状态码：${response.status}`;
         throw new Error(message as string);
       }
 
@@ -168,7 +175,7 @@ contextBridge.exposeInMainWorld('cashew', {
     } catch (error) {
       const event: DBEvent = {
         type: 'db_error',
-        error: error instanceof Error ? error.message : 'Unknown database error',
+        error: error instanceof Error ? error.message : '未知数据库错误',
       };
       if (dbEventListener) {
         dbEventListener(event);

@@ -1,20 +1,24 @@
+import type { DaemonStatus } from '@cashew/shared';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { useChatSession } from '../../chat-session';
-import { ConnectionBanner } from '../../components/connection-banner';
-import { useSessionManager } from '../../session-manager';
-import { resolveConversationIdForSend } from '../../session-send';
-import { useDaemonConnection } from '../../use-daemon-connection';
 import { ChatWorkspace } from './components/chat-workspace';
 import { ConversationSidebar } from './components/conversation-sidebar';
+import { useChatSession } from './hooks/chat-session';
+import { useSessionManager } from './hooks/session-manager';
 import { fetchChatConfig, saveChatConfig } from './lib/chat-config';
 import { getEffectiveLevels, MODELS, type ThinkingLevel } from './lib/model-options';
+import { resolveConversationIdForSend } from './lib/session-send';
 
-export function ChatPage() {
+type ChatPageProps = {
+  daemonStatus: DaemonStatus;
+  isConnected: boolean;
+  onReconnect: () => void;
+};
+
+export function ChatPage({ daemonStatus, isConnected, onReconnect }: ChatPageProps) {
   const navigate = useNavigate();
   const { sessionId: routeSessionId } = useParams();
   const activeSessionId = routeSessionId ?? null;
-  const { isConnected } = useDaemonConnection();
   const {
     sessions,
     messages: dbMessages,
@@ -131,27 +135,29 @@ export function ChatPage() {
   );
 
   const handleCreateSession = useCallback(async () => {
+    if (!isConnected) return;
     const session = await createSession();
     if (session) {
       navigate(`/chat/${session.id}`);
     }
-  }, [createSession, navigate]);
+  }, [createSession, isConnected, navigate]);
 
   const handleDeleteSession = useCallback(
     async (sessionId: string) => {
+      if (!isConnected) return;
       await deleteSession(sessionId);
       if (sessionId === activeSessionId) {
         navigate('/chat');
       }
     },
-    [activeSessionId, deleteSession, navigate],
+    [activeSessionId, deleteSession, isConnected, navigate],
   );
 
   async function sendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     const content = prompt.trim();
-    if (!content || isSending) return;
+    if (!content || isSending || !isConnected) return;
 
     const sessionId = await resolveConversationIdForSend(activeSessionId, createSession);
     if (!sessionId) return;
@@ -172,18 +178,18 @@ export function ChatPage() {
   const latestError = chatError || sessionError;
 
   return (
-    <main className="flex h-screen w-screen min-h-0 min-w-0 flex-col overflow-hidden bg-[linear-gradient(180deg,rgba(255,253,249,0.96),rgba(250,246,239,0.96))] text-foreground">
-      <ConnectionBanner />
-
+    <main className="chat-page-shell flex h-screen w-screen min-h-0 min-w-0 flex-col overflow-hidden bg-[linear-gradient(180deg,rgba(255,253,249,0.96),rgba(250,246,239,0.96))] text-foreground">
       <div className="grid min-h-0 min-w-0 flex-1 grid-cols-[18rem_minmax(0,1fr)]">
         <ConversationSidebar
           sessions={sessions}
           activeSessionId={activeSessionId}
           searchTerm={searchTerm}
           isLoading={isLoading}
+          daemonStatus={daemonStatus}
           onSearchTermChange={setSearchTerm}
           onCreateSession={handleCreateSession}
           onDeleteSession={handleDeleteSession}
+          onReconnect={onReconnect}
         />
 
         <ChatWorkspace
@@ -198,6 +204,7 @@ export function ChatPage() {
           isThinking={isThinking}
           thinkingContent={thinkingContent}
           error={latestError}
+          isConnected={isConnected}
           onPromptChange={setPrompt}
           onModelChange={handleModelChange}
           onThinkingChange={handleThinkingChange}

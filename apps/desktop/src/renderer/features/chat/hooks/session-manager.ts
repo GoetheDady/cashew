@@ -112,7 +112,7 @@ export function useSessionManager({
   // 创建新会话
   const createSession = useCallback(async (title?: string) => {
     if (!enabled) {
-      dispatch({ type: 'set_error', error: 'Cashew service is still starting.' });
+      dispatch({ type: 'set_error', error: 'Cashew 本地服务仍在启动中。' });
       return null;
     }
 
@@ -123,7 +123,7 @@ export function useSessionManager({
   // 切换激活会话
   const activateSession = useCallback(async (sessionId: string) => {
     if (!enabled) {
-      dispatch({ type: 'set_error', error: 'Cashew service is still starting.' });
+      dispatch({ type: 'set_error', error: 'Cashew 本地服务仍在启动中。' });
       return;
     }
 
@@ -134,7 +134,7 @@ export function useSessionManager({
   // 删除会话
   const deleteSession = useCallback(async (sessionId: string) => {
     if (!enabled) {
-      dispatch({ type: 'set_error', error: 'Cashew service is still starting.' });
+      dispatch({ type: 'set_error', error: 'Cashew 本地服务仍在启动中。' });
       return;
     }
 
@@ -144,7 +144,7 @@ export function useSessionManager({
   // 更新会话标题
   const updateSessionTitle = useCallback(async (sessionId: string, title: string) => {
     if (!enabled) {
-      dispatch({ type: 'set_error', error: 'Cashew service is still starting.' });
+      dispatch({ type: 'set_error', error: 'Cashew 本地服务仍在启动中。' });
       return;
     }
 

@@ -43,7 +43,7 @@ export function openDatabase(dbPath: string): Database.Database {
   db.exec(`
     CREATE TABLE IF NOT EXISTS conversations (
       id TEXT PRIMARY KEY,
-      title TEXT NOT NULL DEFAULT 'New Chat',
+      title TEXT NOT NULL DEFAULT '新对话',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -57,6 +57,7 @@ export function openDatabase(dbPath: string): Database.Database {
     CREATE INDEX IF NOT EXISTS idx_messages_conversation
       ON messages(conversation_id, created_at);
   `);
+  db.prepare("UPDATE conversations SET title = '新对话' WHERE title = 'New Chat'").run();
 
   return db;
 }
@@ -71,7 +72,7 @@ function createSession(
   const now = new Date().toISOString();
   const session: SessionRow = {
     id: randomUUID(),
-    title: title || 'New Chat',
+    title: title || '新对话',
     created_at: now,
     updated_at: now,
   };
@@ -143,7 +144,7 @@ export function createSessionRoutes(app: Hono, db: Database.Database): void {
   // 创建会话
   app.post('/sessions', async (c) => {
     const body = await c.req.json().catch(() => ({}));
-    const title = typeof body.title === 'string' ? body.title : 'New Chat';
+    const title = typeof body.title === 'string' ? body.title : '新对话';
     const session = createSession(db, title);
     return c.json(session);
   });
@@ -160,7 +161,7 @@ export function createSessionRoutes(app: Hono, db: Database.Database): void {
     const session = getSession(db, id);
 
     if (!session) {
-      return c.json({ error: 'Session not found' }, 404);
+      return c.json({ error: '未找到该对话' }, 404);
     }
 
     return c.json(session);
@@ -173,13 +174,13 @@ export function createSessionRoutes(app: Hono, db: Database.Database): void {
     const title = body.title;
 
     if (typeof title !== 'string' || !title.trim()) {
-      return c.json({ error: 'title is required' }, 400);
+      return c.json({ error: '标题不能为空' }, 400);
     }
 
     const session = updateSessionTitle(db, id, title.trim());
 
     if (!session) {
-      return c.json({ error: 'Session not found' }, 404);
+      return c.json({ error: '未找到该对话' }, 404);
     }
 
     return c.json(session);
@@ -191,7 +192,7 @@ export function createSessionRoutes(app: Hono, db: Database.Database): void {
     const deleted = deleteSession(db, id);
 
     if (!deleted) {
-      return c.json({ error: 'Session not found' }, 404);
+      return c.json({ error: '未找到该对话' }, 404);
     }
 
     return c.json({ ok: true });
@@ -203,7 +204,7 @@ export function createSessionRoutes(app: Hono, db: Database.Database): void {
     const session = getSession(db, id);
 
     if (!session) {
-      return c.json({ error: 'Session not found' }, 404);
+      return c.json({ error: '未找到该对话' }, 404);
     }
 
     const messages = getMessages(db, id);

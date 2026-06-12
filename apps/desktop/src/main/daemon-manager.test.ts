@@ -61,9 +61,55 @@ describe('DaemonManager', () => {
 
     expect(statuses).toContainEqual({
       state: 'error',
-      message: 'Failed to connect to Cashew service. Make sure the daemon is running.',
+      message: '无法连接到 Cashew 本地服务，请确认服务是否正在运行。',
     });
     expect(statuses.at(-1)).toEqual({ state: 'connected', port: 4567 });
+
+    await manager.stop();
+  });
+
+  it('reports a clean daemon exit as an error', async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'cashew-daemon-manager-test-'));
+    tmpDirs.push(tmpDir);
+    const statuses: DaemonStatus[] = [];
+    const child = fakeChildProcess();
+    const manager = new DaemonManager({
+      portFilePath: join(tmpDir, 'daemon.port'),
+      pollIntervalMs: 100,
+      spawnDaemon: () => child,
+    });
+
+    manager.onStatusChange((status) => statuses.push(status));
+
+    await manager.start();
+    child.emit('exit', 0);
+
+    expect(statuses.at(-1)).toEqual({
+      state: 'error',
+      message: '本地服务已退出，退出代码：0',
+    });
+
+    await manager.stop();
+  });
+
+  it('kills the old child process and spawns a fresh one when reconnecting', async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'cashew-daemon-manager-test-'));
+    tmpDirs.push(tmpDir);
+    const children = [fakeChildProcess(), fakeChildProcess()];
+    const spawnDaemon = vi.fn(() => children.shift() as ChildProcess);
+    const manager = new DaemonManager({
+      portFilePath: join(tmpDir, 'daemon.port'),
+      pollIntervalMs: 100,
+      spawnDaemon,
+    });
+
+    await manager.start();
+    const firstChild = spawnDaemon.mock.results[0].value;
+    await manager.reconnect();
+
+    expect(firstChild.kill).toHaveBeenCalledTimes(1);
+    expect(spawnDaemon).toHaveBeenCalledTimes(2);
+    expect(manager.getStatus()).toEqual({ state: 'connecting' });
 
     await manager.stop();
   });

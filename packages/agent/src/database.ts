@@ -50,10 +50,10 @@ export class ChatDatabase {
   /**
    * 创建新会话
    *
-   * @param title - 会话标题，默认 "New Chat"
+   * @param title - 会话标题，默认“新对话”
    * @returns 新会话对象
    */
-  createSession(title = 'New Chat'): Session {
+  createSession(title = '新对话'): Session {
     const now = Date.now();
     const session: Session = {
       id: randomUUID(),

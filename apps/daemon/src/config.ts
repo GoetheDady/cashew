@@ -156,7 +156,7 @@ export function createConfigRoutes(
 
     if (!validateConfig(merged)) {
       return c.json(
-        { error: `Missing required fields. Required: ${REQUIRED_FIELDS.join(', ')}` },
+        { error: `缺少必填配置项：${REQUIRED_FIELDS.join(', ')}` },
         400,
       );
     }

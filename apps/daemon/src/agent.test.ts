@@ -172,7 +172,7 @@ describe('turn endpoints', () => {
         type: 'turn_failed',
         code: 'missing_api_key',
         message:
-          'Cashew is not configured yet. Add your model provider, model, and API key before sending a message.',
+          'Cashew 尚未完成配置，请先添加模型服务商、模型和 API 密钥。',
       });
     } finally {
       localServer.close();

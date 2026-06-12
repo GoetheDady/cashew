@@ -49,7 +49,7 @@ describe('session CRUD', () => {
       expect(response.status).toBe(200);
       const session = await response.json();
       expect(session.id).toBeDefined();
-      expect(session.title).toBe('New Chat');
+      expect(session.title).toBe('新对话');
       expect(session.created_at).toBeDefined();
       expect(session.updated_at).toBeDefined();
     });
