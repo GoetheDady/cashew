@@ -12,6 +12,11 @@ export interface ChatSessionState {
   isSending: boolean;
   currentTurnId: ChatTurnId | null;
   error: string | null;
+  titleEvent: Extract<ChatEvent, { type: 'title' }> | null;
+  /** 当前 turn 是否正在输出思考内容 */
+  isThinking: boolean;
+  /** 当前 turn 的思考内容（思考结束后保留，供 UI 折叠展示） */
+  thinkingContent: string;
 }
 
 type ChatSessionAction =
@@ -22,6 +27,10 @@ type ChatSessionAction =
   | {
       type: 'send_failed';
       message: string;
+    }
+  | {
+      type: 'session_changed';
+      sessionId: string | null;
     };
 
 export const initialChatSessionState: ChatSessionState = {
@@ -30,6 +39,9 @@ export const initialChatSessionState: ChatSessionState = {
   isSending: false,
   currentTurnId: null,
   error: null,
+  titleEvent: null,
+  isThinking: false,
+  thinkingContent: '',
 };
 
 function assistantPlaceholder(turnId: ChatTurnId, createdAt: string): ChatMessage {
@@ -62,6 +74,14 @@ export function chatSessionReducer(
     };
   }
 
+  // 切换会话时清空消息列表和思考状态，避免残留旧会话的数据
+  if (action.type === 'session_changed') {
+    return {
+      ...initialChatSessionState,
+      sessionId: action.sessionId,
+    };
+  }
+
   const { event } = action;
 
   switch (event.type) {
@@ -83,6 +103,28 @@ export function chatSessionReducer(
         isSending: true,
         currentTurnId: event.turnId,
         error: null,
+        isThinking: false,
+        thinkingContent: '',
+      };
+
+    case 'thinking_start':
+      return {
+        ...state,
+        isThinking: true,
+        thinkingContent: '',
+      };
+
+    case 'thinking_delta':
+      return {
+        ...state,
+        thinkingContent: state.thinkingContent + event.delta,
+      };
+
+    case 'thinking_end':
+      return {
+        ...state,
+        isThinking: false,
+        // thinkingContent 保留，供 UI 展示折叠的思考内容
       };
 
     case 'assistant_delta':
@@ -110,6 +152,12 @@ export function chatSessionReducer(
         currentTurnId: null,
       };
 
+    case 'title':
+      return {
+        ...state,
+        titleEvent: event,
+      };
+
     case 'turn_failed':
       return {
         ...state,
@@ -130,8 +178,17 @@ export function chatSessionReducer(
   }
 }
 
-export function useChatSession(transport: ChatTransport = window.cashew) {
+export function useChatSession(
+  transport: ChatTransport = window.cashew,
+  { sessionId }: { sessionId: string | null } = { sessionId: null },
+) {
   const [state, dispatch] = useReducer(chatSessionReducer, initialChatSessionState);
+
+  // 切换会话时清空 chat 消息（turn_started 后的 stream 消息），
+  // 避免旧会话的 turn 消息残留到新会话的 displayMessages 中
+  useEffect(() => {
+    dispatch({ type: 'session_changed', sessionId });
+  }, [sessionId]);
 
   useEffect(() => {
     return transport.subscribeChatEvents((event) => {
@@ -143,11 +200,12 @@ export function useChatSession(transport: ChatTransport = window.cashew) {
   }, [transport]);
 
   const sendPrompt = useCallback(
-    async (prompt: string) => {
+    async (prompt: string, sessionId?: string) => {
       try {
         await transport.sendChatCommand({
           type: 'start_turn',
           prompt,
+          sessionId,
         });
       } catch (error) {
         dispatch({

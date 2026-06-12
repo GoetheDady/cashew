@@ -28,8 +28,10 @@ ipcMain.on('cashew:daemon-status-unsubscribe', (event, subscriptionId: string) =
 
 const createWindow = () => {
   const mainWindow = new BrowserWindow({
-    width: 800,
-    height: 600,
+    width: 1280,
+    height: 820,
+    minWidth: 1100,
+    minHeight: 700,
     webPreferences: {
       preload: path.join(__dirname, '../preload/preload.js'),
       contextIsolation: true,
@@ -45,7 +47,6 @@ const createWindow = () => {
     mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
   }
 
-  mainWindow.webContents.openDevTools();
 };
 
 app.on('ready', () => {

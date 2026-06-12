@@ -6,7 +6,13 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { openDatabase, createSessionRoutes } from './database.js';
-import { createTurnRoutes, type CreateAgentFn, type DaemonConfig, DefaultSessionManager } from './agent.js';
+import {
+  createTurnRoutes,
+  createTitleStreamOptions,
+  type CreateAgentFn,
+  type DaemonConfig,
+  DefaultSessionManager,
+} from './agent.js';
 import type { AgentLike } from './agent.js';
 import type { AgentEvent } from '@earendil-works/pi-agent-core';
 
@@ -16,7 +22,11 @@ import type { AgentEvent } from '@earendil-works/pi-agent-core';
 
 // ---------- Mock Agent ----------
 
-function createFakeAgent(): AgentLike & { triggerDelta: (delta: string) => void } {
+function createFakeAgent(): AgentLike & {
+  triggerDelta: (delta: string) => void;
+  triggerTextEnd: (content: string) => void;
+  triggerMessageEnd: (content: string) => void;
+} {
   const listeners: Array<(event: AgentEvent, signal: AbortSignal) => void> = [];
   const prompt = vi.fn(async () => {
     // 默认不 emit 任何事件 — 测试通过 triggerDelta 手动控制
@@ -29,12 +39,35 @@ function createFakeAgent(): AgentLike & { triggerDelta: (delta: string) => void 
     },
     prompt: prompt as unknown as AgentLike['prompt'],
     abort: vi.fn(),
+    state: { thinkingLevel: 'minimal' },
     triggerDelta(delta: string) {
       const signal = new AbortController().signal;
       for (const l of listeners) {
         l({
           type: 'message_update' as AgentEvent['type'],
           assistantMessageEvent: { type: 'text_delta', delta },
+        } as AgentEvent, signal);
+      }
+    },
+    triggerTextEnd(content: string) {
+      const signal = new AbortController().signal;
+      for (const l of listeners) {
+        l({
+          type: 'message_update' as AgentEvent['type'],
+          assistantMessageEvent: { type: 'text_end', content },
+        } as AgentEvent, signal);
+      }
+    },
+    triggerMessageEnd(content: string) {
+      const signal = new AbortController().signal;
+      for (const l of listeners) {
+        l({
+          type: 'message_end',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: content }],
+            timestamp: Date.now(),
+          },
         } as AgentEvent, signal);
       }
     },
@@ -173,12 +206,83 @@ describe('turn endpoints', () => {
     const deltas = events.filter((e) => e.event === 'assistant_delta');
     expect(deltas.length).toBeGreaterThanOrEqual(1);
 
-    // 最后是 turn_completed
-    const last = events[events.length - 1];
-    expect(last.event).toBe('turn_completed');
+    expect(events.some((event) => event.event === 'turn_completed')).toBe(true);
   });
 
-  it('POST /turns persists messages to SQLite on turn_completed', async () => {
+  it('POST /turns emits and persists title for the first new-session turn', async () => {
+    fakeAgent.prompt = vi.fn(async () => {
+      fakeAgent.triggerDelta('Route components cleanly.');
+    }) as unknown as AgentLike['prompt'];
+
+    const app = new Hono();
+    const sessionManager = new DefaultSessionManager(createAgent);
+    createSessionRoutes(app, db);
+    createTurnRoutes(app, db, sessionManager, () => mockConfig, async () => '前端路由重构');
+    const localServer = serve({ fetch: app.fetch, port: 0 });
+    const localPort = (localServer.address() as { port: number }).port;
+
+    try {
+      const createResponse = await fetch(`http://localhost:${localPort}/sessions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: 'New Chat' }),
+      });
+      const session = await createResponse.json() as { id: string };
+
+      const response = await fetch(`http://localhost:${localPort}/turns`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: '帮我重构前端路由', sessionId: session.id }),
+      });
+
+      const events = await readSSEStream(response);
+      const completedIndex = events.findIndex((event) => event.event === 'turn_completed');
+      const titleIndex = events.findIndex((event) => event.event === 'title');
+      expect(completedIndex).toBeGreaterThanOrEqual(0);
+      expect(titleIndex).toBeGreaterThan(completedIndex);
+
+      const title = events[titleIndex].data as {
+        type: string;
+        sessionId: string;
+        turnId: string;
+        title: string;
+      };
+      expect(title).toMatchObject({
+        type: 'title',
+        title: '前端路由重构',
+      });
+
+      const updatedSession = db.prepare('SELECT title FROM conversations WHERE id = ?')
+        .get(title.sessionId) as { title: string };
+      expect(updatedSession.title).toBe('前端路由重构');
+    } finally {
+      localServer.close();
+    }
+  });
+
+  it('POST /turns does not emit title for an existing titled session', async () => {
+    fakeAgent.prompt = vi.fn(async () => {
+      fakeAgent.triggerDelta('Bound reply');
+    }) as unknown as AgentLike['prompt'];
+
+    const createResponse = await fetch(`http://localhost:${port}/sessions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'Already named' }),
+    });
+    const session = await createResponse.json() as { id: string };
+
+    const response = await fetch(`http://localhost:${port}/turns`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'Keep the title', sessionId: session.id }),
+    });
+
+    const events = await readSSEStream(response);
+    expect(events.some((event) => event.event === 'title')).toBe(false);
+  });
+
+  it('POST /turns persists user and assistant messages to SQLite on turn_completed', async () => {
     fakeAgent.prompt = vi.fn(async () => {
       fakeAgent.triggerDelta('World');
     }) as unknown as AgentLike['prompt'];
@@ -191,10 +295,93 @@ describe('turn endpoints', () => {
 
     await response.text(); // consume SSE stream
 
-    // 验证消息已持久化（取最后一条 assistant 消息）
-    const messages = db.prepare('SELECT role, content FROM messages WHERE role = ? ORDER BY created_at DESC').all('assistant') as Array<{ role: string; content: string }>;
-    expect(messages.length).toBeGreaterThanOrEqual(1);
-    expect(messages[0].content).toBe('World');
+    // 验证 assistant 消息已持久化
+    const assistantMessages = db.prepare('SELECT role, content FROM messages WHERE role = ? ORDER BY created_at DESC').all('assistant') as Array<{ role: string; content: string }>;
+    expect(assistantMessages.length).toBeGreaterThanOrEqual(1);
+    expect(assistantMessages[0].content).toBe('World');
+
+    // 验证 user 消息也已持久化
+    const userMessages = db.prepare('SELECT role, content FROM messages WHERE role = ? ORDER BY created_at DESC').all('user') as Array<{ role: string; content: string }>;
+    expect(userMessages.length).toBeGreaterThanOrEqual(1);
+    expect(userMessages[0].content).toBe('Hey');
+  });
+
+  it('POST /turns persists messages under the provided sessionId', async () => {
+    fakeAgent.prompt = vi.fn(async () => {
+      fakeAgent.triggerDelta('Bound reply');
+    }) as unknown as AgentLike['prompt'];
+
+    const createResponse = await fetch(`http://localhost:${port}/sessions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'Bound conversation' }),
+    });
+    const session = await createResponse.json() as { id: string };
+
+    const response = await fetch(`http://localhost:${port}/turns`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'Keep me here', sessionId: session.id }),
+    });
+    await response.text();
+
+    const messagesResponse = await fetch(`http://localhost:${port}/sessions/${session.id}/messages`);
+    const messages = await messagesResponse.json() as Array<{ role: string; content: string }>;
+
+    expect(messages.map((message) => [message.role, message.content])).toEqual([
+      ['user', 'Keep me here'],
+      ['assistant', 'Bound reply'],
+    ]);
+  });
+
+  it('POST /turns completes with text_end content when no text_delta was emitted', async () => {
+    fakeAgent.prompt = vi.fn(async () => {
+      fakeAgent.triggerTextEnd('Text from final event');
+    }) as unknown as AgentLike['prompt'];
+
+    const response = await fetch(`http://localhost:${port}/turns`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'Use final content' }),
+    });
+
+    const events = await readSSEStream(response);
+    const completed = events.at(-1)?.data as { type?: string; message?: { content?: string } };
+    expect(completed).toMatchObject({
+      type: 'turn_completed',
+      message: { content: 'Text from final event' },
+    });
+  });
+
+  it('POST /turns completes with message_end text when no streaming text event was emitted', async () => {
+    fakeAgent.prompt = vi.fn(async () => {
+      fakeAgent.triggerMessageEnd('Text from message end');
+    }) as unknown as AgentLike['prompt'];
+
+    const response = await fetch(`http://localhost:${port}/turns`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'Use message end' }),
+    });
+
+    const events = await readSSEStream(response);
+    const completed = events.at(-1)?.data as { type?: string; message?: { content?: string } };
+    expect(completed).toMatchObject({
+      type: 'turn_completed',
+      message: { content: 'Text from message end' },
+    });
+  });
+
+  it('syncConfig updates agent thinkingLevel on subsequent turns', () => {
+    // getOrCreate 首次创建 agent 时 thinkingLevel = 'minimal'（来自 mockConfig）
+    const sessionManager = new DefaultSessionManager(createAgent);
+    const turn1 = sessionManager.getOrCreate(mockConfig, 'test-session');
+    expect(fakeAgent.state.thinkingLevel).toBe('minimal');
+
+    // 修改 config 中的 thinkingLevel，再次 getOrCreate 应同步到 agent
+    const updatedConfig = { ...mockConfig, thinkingLevel: 'xhigh' };
+    sessionManager.getOrCreate(updatedConfig, 'test-session');
+    expect(fakeAgent.state.thinkingLevel).toBe('xhigh');
   });
 
   it('POST /turns/:id/cancel returns 200', async () => {
@@ -202,5 +389,14 @@ describe('turn endpoints', () => {
       method: 'POST',
     });
     expect(response.status).toBe(200);
+  });
+});
+
+describe('defaultGenerateTitle', () => {
+  it('passes the configured api key to the title model call options', () => {
+    expect(createTitleStreamOptions(mockConfig)).toMatchObject({
+      apiKey: mockConfig.apiKey,
+      reasoning: 'minimal',
+    });
   });
 });

@@ -26,6 +26,8 @@ export type ChatCommand =
   | {
       type: "start_turn";
       prompt: string;
+      /** 会话 ID，daemon 用于路由到正确的 Agent 实例 */
+      sessionId?: string;
     }
   | {
       type: "cancel_turn";
@@ -44,6 +46,19 @@ export type ChatEvent =
       message: ChatMessage;
     }
   | {
+      type: "thinking_start";
+      turnId: ChatTurnId;
+    }
+  | {
+      type: "thinking_delta";
+      turnId: ChatTurnId;
+      delta: string;
+    }
+  | {
+      type: "thinking_end";
+      turnId: ChatTurnId;
+    }
+  | {
       type: "assistant_delta";
       turnId: ChatTurnId;
       delta: string;
@@ -52,6 +67,12 @@ export type ChatEvent =
       type: "turn_completed";
       turnId: ChatTurnId;
       message: ChatMessage;
+    }
+  | {
+      type: "title";
+      sessionId: ChatSessionId;
+      turnId: ChatTurnId;
+      title: string;
     }
   | {
       type: "turn_failed";
@@ -106,6 +127,6 @@ export type DBEvent =
   | { type: 'sessions_loaded'; sessions: DBSession[] }
   | { type: 'session_loaded'; session: DBSession | null }
   | { type: 'session_deleted'; sessionId: string }
-  | { type: 'messages_loaded'; messages: DBMessage[] }
+  | { type: 'messages_loaded'; sessionId: string; messages: DBMessage[] }
   | { type: 'session_title_updated'; sessionId: string; title: string }
   | { type: 'db_error'; error: string };

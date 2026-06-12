@@ -2,7 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 import type { ChatCommand, ChatEvent, DBCommand, DBEvent, DaemonStatus } from '@cashew/shared';
 import {
   formatDaemonError,
-  parseSSEStream,
+  readSSEStream,
   mapDBCommandToFetch,
   mapResponseToDBEvent,
 } from './http-client.js';
@@ -32,11 +32,12 @@ let daemonStatusSubscriptionSeq = 0;
 async function startTurnStream(
   port: number,
   prompt: string,
+  sessionId?: string,
 ): Promise<ReadableStreamDefaultReader<Uint8Array>> {
   const response = await fetch(`http://localhost:${port}/turns`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt }),
+    body: JSON.stringify({ prompt, sessionId }),
   });
 
   if (!response.ok) {
@@ -52,6 +53,10 @@ async function startTurnStream(
 }
 
 contextBridge.exposeInMainWorld('cashew', {
+  /** 获取 daemon 端口号 */
+  getDaemonPort: (): Promise<number | null> =>
+    ipcRenderer.invoke('cashew:daemon-port'),
+
   /** 获取 daemon 连接状态 */
   getDaemonStatus: (): Promise<DaemonStatus> =>
     ipcRenderer.invoke('cashew:daemon-status'),
@@ -91,34 +96,28 @@ contextBridge.exposeInMainWorld('cashew', {
       return;
     }
 
-    // start_turn：启动 SSE 流式连接
-    const reader = await startTurnStream(port, command.prompt);
+    // start_turn：启动 SSE 流式连接，增量解析并实时分派事件。
+    // 这样 turn_started（含用户消息）可以立刻到达 UI，
+    // assistant_delta 逐条流式更新，用户感知到即时响应。
+    const reader = await startTurnStream(port, command.prompt, command.sessionId);
     currentSSEReader = reader;
 
-    // 解析 SSE 事件并转发给 listener
-    const stream = new ReadableStream({
-      start(controller) {
-        const pump = async () => {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            controller.enqueue(value);
-          }
-          controller.close();
-        };
-        pump();
-      },
-    });
-
-    const events = await parseSSEStream(stream);
-
-    for (const evt of events) {
-      if (chatEventListener) {
-        chatEventListener(evt.data as ChatEvent);
+    try {
+      await readSSEStream(reader, (evt) => {
+        if (chatEventListener) {
+          chatEventListener(evt.data as ChatEvent);
+        }
+      });
+    } catch (error) {
+      // 当组件卸载时 subscribeChatEvents 的 unsubscribe 回调
+      // 会 cancel reader 并将 currentSSEReader 置 null。
+      // 此时 reader.read() 抛出的错误属于正常流程，不需要向上传播。
+      if (currentSSEReader === reader) {
+        throw error;
       }
+    } finally {
+      currentSSEReader = null;
     }
-
-    currentSSEReader = null;
   },
 
   /** 订阅聊天事件 */
@@ -135,7 +134,7 @@ contextBridge.exposeInMainWorld('cashew', {
   },
 
   /** 发送数据库命令 */
-  sendDBCommand: async (command: DBCommand): Promise<void> => {
+  sendDBCommand: async (command: DBCommand): Promise<DBEvent | null> => {
     try {
       const port = await requireDaemonPort();
       const { url, method, body } = mapDBCommandToFetch(port, command);
@@ -147,17 +146,34 @@ contextBridge.exposeInMainWorld('cashew', {
 
       const data = await response.json();
 
+      if (!response.ok) {
+        // daemon 返回了错误状态码（如 404 Session not found），
+        // 抛出错误以便 catch 分支统一处理为 db_error 事件，
+        // 避免 error 对象被 mapResponseToDBEvent 强制转型为业务数据。
+        const message =
+          typeof data === 'object' && data !== null && 'error' in data &&
+          typeof (data as Record<string, unknown>).error === 'string'
+            ? (data as Record<string, unknown>).error
+            : `Request failed with status ${response.status}`;
+        throw new Error(message as string);
+      }
+
       if (dbEventListener) {
-        const event = mapResponseToDBEvent(command.type, data);
+        const event = mapResponseToDBEvent(command, data);
         if (event) dbEventListener(event);
+        return event;
       }
+
+      return mapResponseToDBEvent(command, data);
     } catch (error) {
+      const event: DBEvent = {
+        type: 'db_error',
+        error: error instanceof Error ? error.message : 'Unknown database error',
+      };
       if (dbEventListener) {
-        dbEventListener({
-          type: 'db_error',
-          error: error instanceof Error ? error.message : 'Unknown database error',
-        });
+        dbEventListener(event);
       }
+      return event;
     }
   },
 

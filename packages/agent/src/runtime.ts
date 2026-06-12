@@ -298,7 +298,7 @@ export class AgentRuntime {
 
         case 'get_messages': {
           const messages = this.db.getMessages(command.sessionId);
-          emit({ type: 'messages_loaded', messages });
+          emit({ type: 'messages_loaded', sessionId: command.sessionId, messages });
           break;
         }
 

@@ -17,12 +17,12 @@ type SessionManagerAction =
   | { type: 'session_created'; session: DBSession }
   | { type: 'session_deleted'; sessionId: string }
   | { type: 'session_activated'; sessionId: string }
-  | { type: 'messages_loaded'; messages: DBMessage[] }
+  | { type: 'messages_loaded'; sessionId: string; messages: DBMessage[] }
   | { type: 'session_title_updated'; sessionId: string; title: string }
   | { type: 'set_loading'; isLoading: boolean }
   | { type: 'set_error'; error: string | null };
 
-function sessionManagerReducer(
+export function sessionManagerReducer(
   state: SessionManagerState,
   action: SessionManagerAction
 ): SessionManagerState {
@@ -50,9 +50,13 @@ function sessionManagerReducer(
       };
 
     case 'session_activated':
-      return { ...state, activeSessionId: action.sessionId, isLoading: true };
+      // 切换会话时清空消息列表，避免短暂显示上一会话的残留数据，
+      // 同时防止加载失败时 dbMessages 仍为旧会话的数据。
+      return { ...state, activeSessionId: action.sessionId, messages: [], isLoading: true };
 
     case 'messages_loaded':
+      // 竞态守卫：只采纳当前激活会话的消息，丢弃旧会话的过期事件
+      if (action.sessionId !== state.activeSessionId) return state;
       return { ...state, messages: action.messages, isLoading: false };
 
     case 'session_title_updated':
@@ -82,10 +86,13 @@ function sessionManagerReducer(
  * - 管理当前激活的会话和对应的消息列表
  * - 监听数据库事件并更新状态
  */
-export function useSessionManager({ enabled = true }: { enabled?: boolean } = {}) {
+export function useSessionManager({
+  enabled = true,
+  activeSessionId,
+}: { enabled?: boolean; activeSessionId?: string | null } = {}) {
   const [state, dispatch] = useReducer(sessionManagerReducer, {
     sessions: [],
-    activeSessionId: null,
+    activeSessionId: activeSessionId ?? null,
     messages: [],
     isLoading: true,
     error: null,
@@ -106,10 +113,11 @@ export function useSessionManager({ enabled = true }: { enabled?: boolean } = {}
   const createSession = useCallback(async (title?: string) => {
     if (!enabled) {
       dispatch({ type: 'set_error', error: 'Cashew service is still starting.' });
-      return;
+      return null;
     }
 
-    await window.cashew.sendDBCommand({ type: 'create_session', title });
+    const event = await window.cashew.sendDBCommand({ type: 'create_session', title });
+    return event?.type === 'session_created' ? event.session : null;
   }, [enabled]);
 
   // 切换激活会话
@@ -143,6 +151,10 @@ export function useSessionManager({ enabled = true }: { enabled?: boolean } = {}
     await window.cashew.sendDBCommand({ type: 'update_session_title', sessionId, title });
   }, [enabled]);
 
+  const applySessionTitle = useCallback((sessionId: string, title: string) => {
+    dispatch({ type: 'session_title_updated', sessionId, title });
+  }, []);
+
   // 监听数据库事件
   useEffect(() => {
     const unsubscribe = window.cashew.subscribeDBEvents((event: DBEvent) => {
@@ -154,7 +166,7 @@ export function useSessionManager({ enabled = true }: { enabled?: boolean } = {}
         case 'session_created':
           dispatch({ type: 'session_created', session: event.session });
           // 自动加载新会话的消息（目前为空）
-          dispatch({ type: 'messages_loaded', messages: [] });
+          dispatch({ type: 'messages_loaded', sessionId: event.session.id, messages: [] });
           break;
 
         case 'session_deleted':
@@ -162,7 +174,7 @@ export function useSessionManager({ enabled = true }: { enabled?: boolean } = {}
           break;
 
         case 'messages_loaded':
-          dispatch({ type: 'messages_loaded', messages: event.messages });
+          dispatch({ type: 'messages_loaded', sessionId: event.sessionId, messages: event.messages });
           break;
 
         case 'session_title_updated':
@@ -194,7 +206,7 @@ export function useSessionManager({ enabled = true }: { enabled?: boolean } = {}
 
   return {
     sessions: state.sessions,
-    activeSessionId: state.activeSessionId,
+    activeSessionId: activeSessionId ?? state.activeSessionId,
     messages: state.messages,
     isLoading: state.isLoading,
     error: state.error,
@@ -203,5 +215,6 @@ export function useSessionManager({ enabled = true }: { enabled?: boolean } = {}
     activateSession,
     deleteSession,
     updateSessionTitle,
+    applySessionTitle,
   };
 }

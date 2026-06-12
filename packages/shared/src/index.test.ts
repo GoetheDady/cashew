@@ -30,10 +30,18 @@ describe("chat protocol", () => {
           return event.sessionId;
         case "turn_started":
           return event.message.content;
+        case "thinking_start":
+          return event.turnId;
+        case "thinking_delta":
+          return event.delta;
+        case "thinking_end":
+          return event.turnId;
         case "assistant_delta":
           return event.delta;
         case "turn_completed":
           return event.message.content;
+        case "title":
+          return event.title;
         case "turn_failed":
           return event.code;
         case "turn_cancelled":
@@ -49,5 +57,14 @@ describe("chat protocol", () => {
         turnId: "turn-1",
       }),
     ).toBe("turn-1");
+
+    expect(
+      renderEvent({
+        type: "title",
+        sessionId: "session-1",
+        turnId: "turn-1",
+        title: "Generated Title",
+      }),
+    ).toBe("Generated Title");
   });
 });

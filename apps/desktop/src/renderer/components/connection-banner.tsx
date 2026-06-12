@@ -1,4 +1,4 @@
-import { Warning, XCircle } from '@phosphor-icons/react';
+import { CircleX } from 'lucide-react';
 import { useDaemonConnection } from '../use-daemon-connection';
 
 /**
@@ -16,8 +16,14 @@ export function ConnectionBanner() {
 
   if (isLoading) {
     return (
-      <div className="connection-banner connection-banner--loading" role="status">
-        <span className="connection-banner__spinner" aria-hidden="true" />
+      <div
+        className="flex items-center gap-2 border-b border-border bg-slate-50 px-5 py-2 text-[13px] text-muted-foreground"
+        role="status"
+      >
+        <span
+          className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-border border-t-primary"
+          aria-hidden="true"
+        />
         <span>正在连接到 Cashew 服务...</span>
       </div>
     );
@@ -25,8 +31,11 @@ export function ConnectionBanner() {
 
   if (hasError) {
     return (
-      <div className="connection-banner connection-banner--error" role="alert">
-        <XCircle size={18} />
+      <div
+        className="flex items-center gap-2 border-b border-red-200 bg-red-50 px-5 py-2 text-[13px] text-red-800"
+        role="alert"
+      >
+        <CircleX size={18} />
         <span>{errorMessage || '无法连接到 Cashew 服务'}</span>
       </div>
     );
